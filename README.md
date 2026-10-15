@@ -123,7 +123,7 @@ Archivos generados en `salidas/`:
 | `recompra_90_nuevos_por_mes.csv`, `clientes_y_venta_mensual_por_tipo.csv`, `clientes_con_compra_por_tienda_y_mes.csv` | Evidencia complementaria (E) |
 | `caso_de_negocio.csv` | Hallazgo traducido a pesos de diciembre de 2025 (E) |
 | `cobertura.csv` | Cobertura de datos (E) |
-| `bitacora_supuestos.csv` | Anexo: bitácora de supuestos (34 reglas) |
+| `bitacora_supuestos.csv` | Anexo: bitácora de supuestos (36 reglas) |
 | `modelo_dimensional.png` | Diagrama del modelo (C) |
 | `graficos/G1` a `G5` | Visualizaciones (E) |
 

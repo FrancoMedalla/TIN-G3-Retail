@@ -2,7 +2,7 @@
 
 **IIC 3752 Tecnologías para la Inteligencia de Negocios · 2026-2 · Grupo 3**
 
-**NOTA: Se recomienda fuertemente correr este código desde Google Colab, entorno en el que fue desarrollado y probado para minimizar posibles problemas de compatibilidad y dependencias al ejecutarlo localmente**
+**NOTA: Se recomienda fuertemente correr el archivo pipeline_multitienda.ipynb desde Google Colab, entorno en el que fue desarrollado y probado para minimizar posibles problemas de compatibilidad y dependencias al ejecutarlo localmente**
 
 Cadena de datos de la Entrega 1\. Responde la **Pregunta 1** del caso retail: *¿la cadena está reteniendo a sus clientes o los está reponiendo con compradores de una sola vez?*
 

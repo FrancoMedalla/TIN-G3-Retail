@@ -1,0 +1,42 @@
+﻿tabla,atributo,qué es,criterio,por qué está / dónde se usa
+fact_venta_linea,boleta_id,Número de boleta del POS (dimensión degenerada),(a) la métrica lo usa,Agrupa las líneas en visitas (visitas_por_boleta)
+fact_venta_linea,linea_id,"Número de línea dentro de la boleta, creado en la limpieza",(a) la métrica lo usa,Con boleta_id forma la llave del grano; el número original se repite en 408 boletas (D02)
+fact_venta_linea,fecha_key,Llave a dim_fecha,(a) la métrica lo usa,Ubica cada visita en la ventana de 90/180 días
+fact_venta_linea,cliente_key,Llave a dim_cliente (0 = anónimo),(a) la métrica lo usa,Identifica a quién retener; separa anónimos
+fact_venta_linea,tienda_key,Llave a dim_tienda,(b) corte de la métrica o de la contraparte,Corte por local pedido por la contraparte
+fact_venta_linea,producto_key,Llave a dim_producto,(c) integra una fuente,Integra el maestro de productos (CSV)
+fact_venta_linea,campana_key,Llave a dim_campana (0 = sin campaña),(c) integra una fuente,Integra las campañas (JSON)
+fact_venta_linea,cantidad,Unidades; negativa = devolución,(c) integra una fuente,Medida propia del grano; identifica devoluciones
+fact_venta_linea,monto_linea,"Monto cobrado, pesos nominales",(a) la métrica lo usa,Visita = boleta con suma de montos > 0 (B07)
+fact_venta_linea,monto_linea_real_dic2025,Monto en pesos de diciembre 2025,(a) la métrica lo usa,Traducción del hallazgo a pesos (IPC de la API)
+fact_venta_linea,linea_cuadra,Bandera: monto = precio × cantidad × (1 − descuento),(c) integra una fuente,Reportar las 727 líneas que no cuadran (pedido de Marketing)
+dim_fecha,fecha_key,Llave aaaammdd,(a) la métrica lo usa,Llave del calendario
+dim_fecha,fecha,Fecha calendario,(a) la métrica lo usa,Ventanas de actividad de 90 y 180 días
+dim_fecha,mes,Mes (1–12),(b) corte de la métrica o de la contraparte,Evidencia mensual: clientes con compra por mes y tipo (G3) y por tienda y mes
+dim_fecha,ipc_var_mensual,Variación mensual del IPC (API mindicador.cl),(c) integra una fuente,Integra la API tal como llega
+dim_fecha,factor_a_pesos_dic2025,Factor para expresar un monto en pesos de dic-2025,(a) la métrica lo usa,Calcula monto_linea_real_dic2025
+dim_cliente,cliente_key,Id del cliente en el POS (0 = anónimo),(a) la métrica lo usa,Unidad de la retención
+dim_cliente,tipo_cliente,Base heredada (alta < 2025) o Nuevo 2025,(b) corte de la métrica o de la contraparte,Corte 'por tipo de cliente' pedido por la contraparte; evita contar antiguos como nuevos
+dim_cliente,segmento,"Clásico / Plus / Black (estado actual, tipo 1)",(b) corte de la métrica o de la contraparte,Corte que la contraparte esperaba; se muestra que no discrimina
+dim_cliente,fecha_alta,Inscripción en la tarjeta,(a) la métrica lo usa,Define tipo_cliente (M01)
+dim_cliente,primera_visita_2025,Primera visita del año (fecha de adquisición),(a) la métrica lo usa,Separa ganados nuevos de reactivados
+dim_tienda,tienda_key,Id del local en el POS,(b) corte de la métrica o de la contraparte,Corte por local
+dim_tienda,tienda,Nombre del local,(b) corte de la métrica o de la contraparte,Etiqueta del corte por local
+dim_tienda,formato,Express / Supermercado / Híper / Online,(b) corte de la métrica o de la contraparte,Los 3 formatos del README: corte natural del negocio
+dim_tienda,canal,Presencial / Web,(b) corte de la métrica o de la contraparte,Reemplaza a la dimensión de canal (decisión 7)
+dim_tienda,comuna,Comuna del local,(b) corte de la métrica o de la contraparte,Base de la jerarquía geográfica del local
+dim_tienda,region,"Región del local (corregida para La Florida, T00)",(b) corte de la métrica o de la contraparte,La contraparte distingue Santiago de regiones
+dim_tienda,macrozona,Metropolitana / Centro sur / Sur,(b) corte de la métrica o de la contraparte,Las 3 macrozonas del README
+dim_producto,producto_key,Llave del producto,(c) integra una fuente,Llave del maestro
+dim_producto,sku,Código del producto,(c) integra una fuente,Une las ventas con el maestro (CSV)
+dim_producto,nombre,Nombre del producto,(c) integra una fuente,Trazabilidad del SKU
+dim_producto,categoria,Categoría normalizada (8),(c) integra una fuente,Corte mínimo del maestro (P02)
+dim_producto,subcategoria,Subcategoría,(c) integra una fuente,Valida la normalización de categorías
+dim_producto,en_maestro,Falso = SKU vendido que no está en el catálogo,(c) integra una fuente,Declara los 193 SKU sin maestro (M03)
+dim_campana,campana_key,Llave de la campaña (0 = sin campaña),(c) integra una fuente,Llave de las campañas
+dim_campana,campana_id,Id de la campaña en el JSON,(c) integra una fuente,Trazabilidad con la fuente
+dim_campana,nombre,Nombre de la campaña,(c) integra una fuente,Etiqueta
+dim_campana,tipo,descuento_directo / 2x1,(c) integra una fuente,El 2x1 no queda en la línea: explica por qué se asigna por SKU+fecha+canal
+dim_campana,fecha_ini,Inicio de la campaña,(c) integra una fuente,Asignación de líneas a la campaña
+dim_campana,fecha_fin,Fin de la campaña,(c) integra una fuente,Asignación de líneas a la campaña
+dim_campana,descuento_pct,"Descuento declarado (0,25 / 0,50)",(c) integra una fuente,Describe la oferta; contrasta con el descuento de la línea

@@ -1,0 +1,4 @@
+grupo,activos_jun,retenidos,tasa_retencion,poco_confiable
+Presencial,266,97,0.36466165413533835,False
+Web,71,31,0.43661971830985913,False
+Presencial + Web,150,74,0.49333333333333335,False

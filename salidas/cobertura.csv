@@ -1,8 +1,0 @@
-paso,boletas,regla,% del origen
-Boletas en origen,6338,,100.0
-(-) Duplicadas exactas,-62,B01,1.0
-(-) Fuera de 2025,-37,B03,0.6
-= Boletas válidas 2025,6239,,98.4
-(-) Anónimas (sin cliente_id),-813,B06,12.8
-(-) Identificadas sin monto positivo,-41,B07,0.6
-= Visitas identificadas usadas en la retención,5385,,85.0

@@ -12,7 +12,7 @@
 import numpy as np
 import pandas as pd
 
-from comun import (CIFRAS_PUBLICADAS, CORTE_1, CORTE_2, EN_DATABRICKS, ID_CORRIDA, METRICAS, REGLA_LECTURA,
+from comun import (COSTO_CONTACTO_SUPUESTO, CUPON_SUPUESTO, DIA_CONTACTO, DIA_FIN_CONTACTO, CIFRAS_PUBLICADAS, CORTE_1, CORTE_2, EN_DATABRICKS, ID_CORRIDA, METRICAS, REGLA_LECTURA,
                    UMBRAL_LECTURA, VENTANA_BASE, VENTANAS, Bitacora, Pruebas, a_pandas, ahora, escribir_pandas,
                    guardar_salida_csv, leer, nombre_tabla, spark, sql_metricas, yaml_metric_view)
 
@@ -237,6 +237,38 @@ print(caso)
 
 # COMMAND ----------
 
+# MAGIC %md ## Contacto entre los días 34 y 45 sin compra
+# MAGIC Un episodio de contacto es una pausa en la que el cliente cumple 34 días sin comprar dentro de 2025. Para cada
+# MAGIC episodio se registra si el cliente volvió solo (antes de 45 o de 90 días) o si no volvió en 90 días (en riesgo).
+
+# COMMAND ----------
+
+vc = vis.sort_values(["cliente_key", "fecha"]).copy()
+vc["siguiente"] = vc.groupby("cliente_key").fecha.shift(-1)
+vc["dias_pausa"] = (vc.siguiente - vc.fecha).dt.days
+vc["dias_observados"] = (C2 - vc.fecha).dt.days
+ep = vc[(vc.dias_pausa > DIA_CONTACTO) | (vc.siguiente.isna() & (vc.dias_observados > DIA_CONTACTO))]
+vuelve_45 = int(((ep.dias_pausa > DIA_CONTACTO) & (ep.dias_pausa <= DIA_FIN_CONTACTO)).sum())
+vuelve_90 = int(((ep.dias_pausa > DIA_FIN_CONTACTO) & (ep.dias_pausa <= 90)).sum())
+en_riesgo = int(((ep.dias_pausa > 90) | (ep.siguiente.isna() & (ep.dias_observados > 90))).sum())
+contacto = pd.DataFrame([{
+    "contactos_al_anio": len(ep), "clientes_contactados": int(ep.cliente_key.nunique()),
+    "vuelven_solos_antes_de_45": vuelve_45, "vuelven_solos_entre_46_y_90": vuelve_90,
+    "en_riesgo_no_vuelven_en_90": en_riesgo, "sin_observacion_suficiente": len(ep) - vuelve_45 - vuelve_90 - en_riesgo,
+    "venta_media_por_visita": round(vis.monto_boleta_real_dic2025.mean()),
+    "margen_anual_por_cliente_recuperado": round(mensual_margen * 12),
+    "margen_anual_por_10_puntos": round(por_10pp * mensual_margen * 12),
+    "costo_contacto_supuesto": COSTO_CONTACTO_SUPUESTO, "cupon_supuesto": CUPON_SUPUESTO,
+}])
+c0 = contacto.iloc[0]
+costo_total = (c0.contactos_al_anio * COSTO_CONTACTO_SUPUESTO
+               + (vuelve_45 + vuelve_90) * c0.venta_media_por_visita * CUPON_SUPUESTO)
+contacto["costo_anual_supuesto"] = round(costo_total)
+contacto["clientes_para_pagar_el_costo"] = int(np.ceil(costo_total / c0.margen_anual_por_cliente_recuperado))
+print(contacto.T)
+
+# COMMAND ----------
+
 # MAGIC %md ## Reglas de la métrica (bitácora)
 
 # COMMAND ----------
@@ -260,6 +292,12 @@ registrar("K04", "métrica", "Ventana móvil de 90 días y no trimestre calendar
           f"{rep_trim:.1%}", len(t2),
           f"Ninguno: la retención cambia {abs(ret_trim - res.loc[90, 'tasa_retencion']) * 100:.1f} puntos y la "
           f"conclusión ({'repone' if rep_trim > UMBRAL_LECTURA else 'retiene'}) se mantiene", "medido")
+registrar("K07", "métrica", f"Contacto al cumplir {DIA_CONTACTO} días sin compra; costo = contactos x costo por contacto "
+          f"+ cupón de {CUPON_SUPUESTO:.0%} sobre la compra de quienes vuelven",
+          f"El 75% de las pausas termina antes de {DIA_CONTACTO} días. Costo por contacto (${COSTO_CONTACTO_SUPUESTO}) y "
+          "cupón son supuestos: el caso no trae costos de contacto; el tablero permite cambiarlos",
+          len(ep), "Si el contacto o el cupón costaran más, sube el número de clientes que hay que recuperar para "
+          "pagar la acción; el tablero muestra ese punto de equilibrio", "medido y supuesto")
 registrar("K03", "métrica", "Tienda principal = tienda con más visitas del cliente en la ventana de junio",
           "La mayoría de los clientes compra en más de un local; se asigna uno para cortar la retención",
           int(res.loc[90, "activos_jun"]), "Un cliente repartido entre locales queda asignado solo a uno", "inferido")
@@ -297,7 +335,7 @@ pruebas.cerrar()
 for tabla, df in {"metrica_retencion": metrica, "retencion_por_tipo": por_tipo, "sensibilidad_k05": sens,
                   "retencion_por_segmento": por_segmento, "retencion_por_tienda": por_tienda,
                   "evidencia_recompra_nuevos": recompra, "evidencia_clientes_mes": mensual,
-                  "pausas_entre_compras": pausas, "caso_negocio": caso}.items():
+                  "pausas_entre_compras": pausas, "caso_negocio": caso, "contacto_34_45": contacto}.items():
     escribir_pandas(df, "oro", tabla)
 bit.guardar()
 
@@ -326,6 +364,7 @@ guardar_salida_csv(por_segmento, "retencion_por_segmento.csv", index=False)
 guardar_salida_csv(recompra, "recompra_90_nuevos_por_mes.csv", index=False)
 guardar_salida_csv(mensual, "clientes_y_venta_mensual_por_tipo.csv", index=False)
 guardar_salida_csv(caso, "caso_de_negocio.csv", index=False)
+guardar_salida_csv(contacto, "contacto_34_45.csv", index=False)
 guardar_salida_csv(cobertura, "cobertura.csv", index=False)
 guardar_salida_csv(pausas, "pausas_entre_compras.csv", index=False)
 guardar_salida_csv(bitacora, "bitacora_supuestos.csv", index=False)

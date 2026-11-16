@@ -20,6 +20,9 @@ La cadena integra cuatro fuentes (POS en SQLite, maestro de productos en CSV, ca
 │   └── responsables_bitacora.csv # responsable y fecha de cada regla de la bitácora
 ├── data/                         # fuentes y respaldo del IPC
 ├── salidas/                      # cifras de la última corrida en CSV
+├── tablero/
+│   ├── retencion_clientes.lvdash.json  # tablero AI/BI de Databricks
+│   └── generar_tablero.py        # genera el tablero (permite cambiar el catálogo)
 ├── databricks.yml                # definición del Job
 ├── correr_local.py               # ejecución local
 └── requirements.txt
@@ -49,6 +52,21 @@ La cadena integra cuatro fuentes (POS en SQLite, maestro de productos en CSV, ca
 3. *Run now*. Las tablas quedan en el catálogo indicado y los CSV en el Volume `oro.salidas`.
 
 Si el catálogo principal del workspace tiene otro nombre, se debe ajustar el parámetro `catalogo`.
+
+## Tablero
+
+El tablero lee la metric view `oro.mv_retencion` y las tablas de `oro` y `control`, de modo que muestra siempre la última corrida de la cadena.
+
+- **Pantalla principal:** pregunta, filtros de ventana (30, 90 o 180 días) y tipo de cliente, retención y reposición con su comparación, regla de lectura, cobertura, base activa de junio y diciembre, retención por local con intervalo de confianza, valor y costo del contacto entre los días 34 y 45 (con costo por contacto y cupón ajustables), detalle por local y pie con fuente, fecha de actualización, dueño del dato y resultado de las pruebas.
+- **Decisión de definición:** las tres ventanas lado a lado y la sensibilidad de la retención por antigüedad.
+
+Importación:
+
+1. *Dashboards* → *Create dashboard* (flecha) → *Import dashboard from file* → `tablero/retencion_clientes.lvdash.json`.
+2. Seleccionar el SQL warehouse del workspace y publicar con *Publish*.
+3. Para que el tablero se refresque al terminar la cadena, agregar al Job una sexta tarea de tipo *Dashboard*, dependiente de `semantica`, que apunte a este tablero.
+
+Si el catálogo no es `workspace`: `python tablero/generar_tablero.py <catalogo>` y volver a importar.
 
 ## Ejecución local
 

@@ -238,6 +238,12 @@ DIMENSIONES = {
 REGLA_LECTURA = (f"La cadena REPONE si más del {UMBRAL_LECTURA:.0%} de los activos al 31-dic no estaban activos "
                  "al 30-jun; si no, RETIENE. Regla fijada antes de calcular.")
 
+# Ventana de contacto: se contacta al cliente que cumple DIA_CONTACTO días sin comprar (percentil 75 de las
+# pausas entre compras). Los costos son supuestos ajustables en el tablero.
+DIA_CONTACTO, DIA_FIN_CONTACTO = 34, 45
+COSTO_CONTACTO_SUPUESTO = 100
+CUPON_SUPUESTO = 0.10
+
 # Cifras publicadas en el informe; la prueba S-MET-05 advierte si la cadena deja de reproducirlas.
 CIFRAS_PUBLICADAS = {30: (0.1860, 0.8609), 90: (0.4148, 0.6944), 180: (0.5864, 0.5870)}
 

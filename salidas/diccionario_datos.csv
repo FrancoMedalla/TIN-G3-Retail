@@ -43,5 +43,5 @@ dim_campana,campana_id,Código de la campaña,Campañas (JSON),Sin cambios,códi
 dim_campana,nombre,Nombre de la campaña,Campañas (JSON),Sin cambios,texto
 dim_campana,tipo,Descuento directo o 2x1,Campañas (JSON),Sin cambios,texto
 dim_campana,fecha_ini,Inicio de la campaña,Campañas (JSON),A fecha,fecha
-dim_campana,fecha_fin,Fin de la campaña,Campañas (JSON),A fecha,fecha
+dim_campana,fecha_fin,Último día de la campaña (inclusive),Campañas (JSON),A fecha,fecha
 dim_campana,descuento_pct,Descuento declarado,Campañas (JSON),25% y 50 a proporción (C01),proporción

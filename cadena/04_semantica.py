@@ -304,6 +304,49 @@ registrar("K03", "métrica", "Tienda principal = tienda con más visitas del cli
 
 # COMMAND ----------
 
+# MAGIC %md ## Linaje por campo: del origen a la pantalla
+
+# COMMAND ----------
+
+KPI, CASCADA, LOCALES, VALE = ("Cifras clave", "Base activa jun/dic", "Retención por local y detalle",
+                               "Vale / cuesta")
+LINAJE = [
+    ("POS · boletas.fecha", "B02 (5 formatos de fecha), B03 (solo 2025)", "plata.boletas.fecha",
+     "fact_venta_linea.fecha_key → dim_fecha.fecha",
+     "Cliente activo: visita en los W días previos al corte (activo_jun, activo_dic)",
+     "tasa_retencion, tasa_reposicion", f"{KPI}; {CASCADA}; {LOCALES}; Decisión de definición"),
+    ("POS · boletas.boleta_id", "B01 (duplicados exactos)", "plata.boletas.boleta_id",
+     "fact_venta_linea.boleta_id", "Una boleta = una visita", "todas", "Todas"),
+    ("POS · boletas.cliente_id", "B06 (anónimas fuera de la retención)", "plata.boletas.cliente_id",
+     "fact_venta_linea.cliente_key → dim_cliente", "Unidad de conteo: el cliente",
+     "todas", "Todas; Cobertura"),
+    ("POS · boleta_detalle.monto_linea", "D04 (devoluciones), D05 (no se corrige lo cobrado)",
+     "plata.detalle.monto_linea", "fact_venta_linea.monto_linea", "Visita solo si el monto neto es > 0 (B07)",
+     "tasa_retencion, tasa_reposicion", f"{KPI}; {CASCADA}"),
+    ("POS · boletas.tienda_id", "T00 (región de La Florida), B05 (región desde la tienda)",
+     "plata.boletas.tienda_id", "fact_venta_linea.tienda_key → dim_tienda.tienda",
+     "Tienda principal: local con más visitas en la ventana de junio (K03)", "tasa_retencion por local (K06)",
+     LOCALES),
+    ("POS · clientes.fecha_alta", "Fecha interpretada en dos formatos; no se corrige (M02)",
+     "plata.clientes.fecha_alta", "dim_cliente.tipo_cliente (M01)",
+     "Tipo de cliente y marca de alta posterior a la primera compra (K05)", "tasa_retencion por tipo",
+     "Filtro de tipo de cliente; Sensibilidad de la antigüedad"),
+    ("Maestro · costo_unitario", "P03 (texto a número), P04 (SKU repetido)", "plata.productos.costo_unitario",
+     "fact_venta_linea.costo_linea, margen_linea (M08)", "Margen de los clientes perdidos y por recuperar",
+     "margen_anual_por_10_puntos, costo y equilibrio del contacto (K07)", VALE),
+    ("POS · boleta_detalle.cantidad", "D04 (cantidad negativa = devolución)", "plata.detalle.cantidad",
+     "fact_venta_linea.cantidad → costo_linea", "Costo de la línea = cantidad × costo unitario",
+     "margen_anual_por_10_puntos", VALE),
+    ("API mindicador · IPC mensual", "I01 (índice encadenado); respaldo fechado si la API falla",
+     "plata.ipc_mensual.factor_a_pesos_dic2025", "dim_fecha.factor_a_pesos_dic2025",
+     "Montos y margen en pesos de diciembre de 2025", "margen_anual_por_10_puntos", f"{VALE}; pie (origen del IPC)"),
+]
+linaje = pd.DataFrame(LINAJE, columns=["campo_origen", "regla_limpieza", "campo_plata", "campo_modelo",
+                                       "uso_en_la_metrica", "medida", "pantalla"])
+linaje.insert(0, "orden", range(1, len(linaje) + 1))
+
+# COMMAND ----------
+
 # MAGIC %md ## Pruebas de la métrica
 
 # COMMAND ----------
@@ -338,15 +381,19 @@ for tabla, df in {"metrica_retencion": metrica, "retencion_por_tipo": por_tipo, 
                   "pausas_entre_compras": pausas, "caso_negocio": caso, "contacto_34_45": contacto}.items():
     escribir_pandas(df, "oro", tabla)
 bit.guardar()
+escribir_pandas(linaje, "control", "linaje_metrica")
 
 bitacora = pd.concat([a_pandas("control", f"bitacora_{c}") for c in ("plata", "oro", "semantica")], ignore_index=True)
 escribir_pandas(bitacora, "control", "bitacora_supuestos")
 todas = a_pandas("control", "pruebas_resultados")
 ultima = todas[todas.id_corrida == ID_CORRIDA]
 carga = a_pandas("control", "bitacora_carga")
-origen_ipc = carga[carga.id_corrida == ID_CORRIDA].origen_ipc.iloc[0] if (carga.id_corrida == ID_CORRIDA).any() else "?"
+esta_carga = carga[carga.id_corrida == ID_CORRIDA]
+origen_ipc = esta_carga.origen_ipc.iloc[0] if len(esta_carga) else "?"
+fecha_respaldo = (esta_carga.fecha_respaldo_ipc.iloc[0]
+                  if len(esta_carga) and "fecha_respaldo_ipc" in esta_carga else "sin fecha")
 estado = pd.DataFrame([{
-    "id_corrida": ID_CORRIDA, "fecha_hora": ahora(), "origen_ipc": origen_ipc,
+    "id_corrida": ID_CORRIDA, "fecha_hora": ahora(), "origen_ipc": origen_ipc, "fecha_respaldo_ipc": fecha_respaldo,
     "pruebas": len(ultima), "pruebas_ok": int((ultima.resultado == "pasó").sum()),
     "avisos": int(((ultima.resultado == "falló") & (ultima.severidad == "avisa")).sum()),
     "pct_pruebas_ok": (ultima.resultado == "pasó").mean(),
@@ -370,5 +417,6 @@ guardar_salida_csv(pausas, "pausas_entre_compras.csv", index=False)
 guardar_salida_csv(bitacora, "bitacora_supuestos.csv", index=False)
 guardar_salida_csv(ultima, "pruebas_ultima_corrida.csv", index=False)
 guardar_salida_csv(a_pandas("oro", "diccionario_datos"), "diccionario_datos.csv", index=False)
+guardar_salida_csv(linaje, "linaje_metrica.csv", index=False)
 print(f"Corrida {ID_CORRIDA} publicada: {estado.pruebas_ok.iloc[0]}/{estado.pruebas.iloc[0]} pruebas en verde, "
       f"IPC desde {origen_ipc}.")

@@ -7,6 +7,7 @@
 
 # COMMAND ----------
 
+import json
 import os
 import shutil
 import sqlite3
@@ -106,7 +107,8 @@ pruebas.verificar("B-JSON-02", "Campañas (JSON)", "Toda campaña tiene fecha de
 # COMMAND ----------
 
 # MAGIC %md ## Fuente 4 · IPC mensual 2025 (API de mindicador.cl)
-# MAGIC Tres intentos. Si fallan, se usa `ipc_2025_respaldo.json` del Volume y la prueba B-API-02 lo advierte.
+# MAGIC Tres intentos. Si la API responde, la respuesta se guarda como respaldo con su fecha de descarga. Si fallan,
+# MAGIC se usa ese respaldo, la prueba B-API-02 lo advierte y el tablero muestra la fecha del respaldo.
 # MAGIC La falla se puede reproducir ejecutando el Job con el parámetro `url_ipc` apuntando a una URL inválida.
 
 # COMMAND ----------
@@ -126,11 +128,17 @@ for intento in range(1, 4):
         print(f"Intento {intento} falló: {error_api}")
         time.sleep(2)
 if origen_ipc == "api":
-    print("API OK")
+    fecha_respaldo = ahora().strftime("%Y-%m-%d")
+    with open(RESPALDO_IPC, "w", encoding="utf-8") as f:
+        json.dump({"fecha_descarga": fecha_respaldo, **payload}, f, ensure_ascii=False, indent=1)
+    print(f"API OK; respaldo actualizado ({fecha_respaldo})")
 else:
+    if not os.path.exists(RESPALDO_IPC):
+        raise RuntimeError("La API no respondió y no hay respaldo del IPC: no se publica la corrida.")
     payload = leer_json_fuente("ipc_2025_respaldo.json")
     origen_ipc = "respaldo"
-    print(f"ATENCIÓN: la API no respondió; se usa {RESPALDO_IPC}")
+    fecha_respaldo = payload.get("fecha_descarga", "sin fecha")
+    print(f"ATENCIÓN: la API no respondió; se usa el respaldo descargado el {fecha_respaldo}")
 
 filas_ipc = [(s["fecha"], float(s["valor"]), payload.get("unidad_medida"), payload.get("codigo"))
              for s in payload["serie"]]
@@ -154,6 +162,6 @@ pruebas.verificar("B-API-02", "IPC (API)", "El IPC viene de la API y no del resp
 pruebas.cerrar()
 for tabla, df in listas.items():
     escribir(df, "bronce", tabla)
-estado = pd.DataFrame(carga).assign(origen_ipc=origen_ipc, error_api=error_api)
+estado = pd.DataFrame(carga).assign(origen_ipc=origen_ipc, fecha_respaldo_ipc=fecha_respaldo, error_api=error_api)
 escribir_pandas(estado, "control", "bitacora_carga", modo="append")
 print(f"Bronce publicado. Corrida {ID_CORRIDA}. IPC desde: {origen_ipc}")

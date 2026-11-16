@@ -72,8 +72,8 @@ def escribir(df, capa, tabla, modo="overwrite"):
     invalidas = [c for c in df.columns if any(ch in c for ch in " ,;{}()\n\t=")]
     assert not invalidas, f"Nombres de columna no válidos para Delta: {invalidas}"
     if EN_DATABRICKS:
-        (df.write.mode(modo).option("overwriteSchema", "true" if modo == "overwrite" else "false")
-           .saveAsTable(nombre_tabla(capa, tabla)))
+        opcion = ("overwriteSchema", "true") if modo == "overwrite" else ("mergeSchema", "true")
+        df.write.mode(modo).option(*opcion).saveAsTable(nombre_tabla(capa, tabla))
     else:
         df.write.mode(modo).parquet(ruta_local(capa, tabla))
     print(f"  -> {capa}.{tabla} ({modo})")
@@ -82,7 +82,7 @@ def escribir(df, capa, tabla, modo="overwrite"):
 def leer(capa, tabla):
     if EN_DATABRICKS:
         return spark.table(nombre_tabla(capa, tabla))
-    return spark.read.parquet(ruta_local(capa, tabla))
+    return spark.read.option("mergeSchema", "true").parquet(ruta_local(capa, tabla))
 
 
 def a_pandas(capa, tabla, sin_metadatos=True):

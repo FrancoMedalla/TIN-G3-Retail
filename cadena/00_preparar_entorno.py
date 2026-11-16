@@ -3,6 +3,7 @@
 # MAGIC # 00 · Preparación del entorno
 # MAGIC Crea los esquemas `bronce`, `plata`, `oro` y `control`, el Volume `bronce.fuentes` (archivos de origen) y el
 # MAGIC Volume `oro.salidas` (cifras en CSV), y copia las fuentes desde la carpeta `data/` del repositorio.
+# MAGIC El respaldo del IPC solo se copia si el Volume no tiene uno, para no reemplazar un respaldo más reciente.
 # MAGIC Puede ejecutarse cualquier número de veces.
 
 # COMMAND ----------
@@ -23,7 +24,9 @@ if EN_DATABRICKS:
     origen = os.path.join(RAIZ_REPO, "data")
     for archivo in ARCHIVOS:
         destino = os.path.join(DIR_FUENTES, archivo)
-        if os.path.exists(os.path.join(origen, archivo)):
+        if archivo == "ipc_2025_respaldo.json" and os.path.exists(destino):
+            print(f"{archivo} ya está en el Volume; se conserva")
+        elif os.path.exists(os.path.join(origen, archivo)):
             shutil.copyfile(os.path.join(origen, archivo), destino)
             print(f"Copiado {archivo} -> {destino}")
         elif os.path.exists(destino):

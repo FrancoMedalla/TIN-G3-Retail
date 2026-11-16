@@ -22,7 +22,8 @@ La cadena integra cuatro fuentes (POS en SQLite, maestro de productos en CSV, ca
 ├── salidas/                      # cifras de la última corrida en CSV
 ├── tablero/
 │   ├── retencion_clientes.lvdash.json  # tablero AI/BI de Databricks
-│   └── generar_tablero.py        # genera el tablero (permite cambiar el catálogo)
+│   ├── generar_tablero.py        # genera el tablero y define sus consultas
+│   └── app_local.py              # copia local del tablero (Streamlit), con las mismas consultas
 ├── databricks.yml                # definición del Job
 ├── correr_local.py               # ejecución local
 └── requirements.txt
@@ -36,11 +37,12 @@ La cadena integra cuatro fuentes (POS en SQLite, maestro de productos en CSV, ca
 | plata | Datos tipados y limpios según las reglas de la bitácora | `plata.boletas`, `plata.detalle`, `plata.clientes`, `plata.productos` |
 | oro | Esquema en estrella: `fact_venta_linea` y dimensiones de fecha, cliente, tienda, producto y campaña | `oro.fact_venta_linea`, `oro.dim_*`, `oro.diccionario_datos` |
 | semántica | Estado de cada cliente por ventana, metric view y tablas de consumo | `oro.cliente_ventana`, `oro.mv_retencion`, `oro.metrica_retencion`, `oro.retencion_por_*`, `oro.caso_negocio` |
-| control | Resultados de pruebas, bitácoras, cobertura y estado de cada corrida | `control.pruebas_resultados`, `control.bitacora_carga`, `control.bitacora_supuestos`, `control.cobertura`, `control.estado_corrida` |
+| control | Resultados de pruebas, bitácoras, cobertura, linaje y estado de cada corrida | `control.pruebas_resultados`, `control.bitacora_carga`, `control.bitacora_supuestos`, `control.cobertura`, `control.linaje_metrica`, `control.estado_corrida` |
 
 - **Carga completa:** cada corrida reconstruye las tablas de datos. Dos corridas con las mismas fuentes producen las mismas claves y cifras. Las tablas de `control` acumulan una entrada por corrida.
 - **Pruebas:** cada capa valida sus datos antes de publicarlos. Una prueba bloqueante que falla detiene el Job sin modificar la capa, por lo que el tablero conserva la última corrida válida. Las pruebas de advertencia permiten continuar y quedan indicadas en el pie del tablero.
-- **Falla de la API:** tras tres intentos fallidos se utiliza `ipc_2025_respaldo.json` y el origen queda registrado en `control.bitacora_carga`.
+- **Falla de la API:** cuando la API responde, la respuesta se guarda como respaldo con su fecha de descarga (`ipc_2025_respaldo.json` en el Volume `bronce.fuentes`). Tras tres intentos fallidos se usa ese respaldo; el origen y la fecha quedan en `control.bitacora_carga` y en el pie del tablero. Sin respaldo, la corrida se detiene.
+- **Linaje:** `control.linaje_metrica` sigue cada campo que entra en la métrica desde su origen, pasando por la regla de limpieza y el modelo, hasta la pantalla que lo muestra.
 
 ## Ejecución en Databricks
 
@@ -59,6 +61,7 @@ El tablero lee la metric view `oro.mv_retencion` y las tablas de `oro` y `contro
 
 - **Pantalla principal:** pregunta, filtros de ventana (30, 90 o 180 días) y tipo de cliente, retención y reposición con su comparación, regla de lectura, cobertura, base activa de junio y diciembre, retención por local con intervalo de confianza, valor y costo del contacto entre los días 34 y 45 (con costo por contacto y cupón ajustables), detalle por local y pie con fuente, fecha de actualización, dueño del dato y resultado de las pruebas.
 - **Decisión de definición:** las tres ventanas lado a lado y la sensibilidad de la retención por antigüedad.
+- **Calidad de datos:** pruebas de la última corrida, historial de corridas, origen del IPC y linaje de la métrica.
 
 Importación:
 
@@ -77,7 +80,13 @@ pip install -r requirements.txt
 python correr_local.py
 ```
 
-Tiempo aproximado: 40 segundos. Las tablas quedan en `lakehouse_local/` y los CSV en `salidas/`.
+Tiempo aproximado: 45 segundos. Las tablas quedan en `lakehouse_local/` y los CSV en `salidas/`.
+
+Copia local del tablero, con las mismas consultas y cifras que la versión de Databricks:
+
+```bash
+streamlit run tablero/app_local.py
+```
 
 ## Resultado esperado
 

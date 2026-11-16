@@ -111,6 +111,8 @@ registrar("M03", "dim_producto", "Cada SKU vendido que no está en el maestro ob
           "medido")
 
 dim_campana = camp_p[["campana_id", "nombre", "tipo", "fecha_ini", "fecha_fin", "descuento_pct"]].copy()
+dim_campana["fecha_ini"] = pd.to_datetime(dim_campana.fecha_ini).dt.normalize()
+dim_campana["fecha_fin"] = pd.to_datetime(dim_campana.fecha_fin).dt.normalize()
 dim_campana.insert(0, "campana_key", range(1, len(dim_campana) + 1))
 sin_camp = pd.DataFrame([{"campana_key": 0, "campana_id": "SIN", "nombre": "Sin campaña", "tipo": "Ninguna",
                           "fecha_ini": pd.NaT, "fecha_fin": pd.NaT, "descuento_pct": 0.0}])
@@ -231,7 +233,7 @@ D = [
  ("dim_campana", "nombre", "Nombre de la campaña", JSN, "Sin cambios", "texto"),
  ("dim_campana", "tipo", "Descuento directo o 2x1", JSN, "Sin cambios", "texto"),
  ("dim_campana", "fecha_ini", "Inicio de la campaña", JSN, "A fecha", "fecha"),
- ("dim_campana", "fecha_fin", "Fin de la campaña", JSN, "A fecha", "fecha"),
+ ("dim_campana", "fecha_fin", "Último día de la campaña (inclusive)", JSN, "A fecha", "fecha"),
  ("dim_campana", "descuento_pct", "Descuento declarado", JSN, "25% y 50 a proporción (C01)", "proporción"),
 ]
 diccionario = pd.DataFrame(D, columns=["tabla", "campo", "significado_negocio", "origen", "regla_transformacion",

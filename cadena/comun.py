@@ -11,21 +11,22 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 from pyspark.sql import SparkSession
+from pyspark.sql.types import DateType
 
 EN_DATABRICKS = "DATABRICKS_RUNTIME_VERSION" in os.environ
 ZONA = "America/Santiago"
 RAIZ_REPO = os.environ.get("RAIZ_REPO", os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+# Spark trabaja en UTC: las fechas del POS son días calendario y en America/Santiago algunas medianoches no
+# existen por el cambio de horario (por ejemplo, 2025-09-07 00:00). Las conversiones a hora de Chile se hacen
+# de forma explícita donde corresponde.
 if EN_DATABRICKS:
     spark = SparkSession.builder.getOrCreate()
-    try:
-        spark.conf.set("spark.sql.session.timeZone", ZONA)
-    except Exception:
-        pass
+    spark.conf.set("spark.sql.session.timeZone", "UTC")
 else:
     # Arrow se desactiva en local por incompatibilidad de Spark 3.5 con Java 21.
     spark = (SparkSession.builder.appName("multitienda").master("local[*]")
-             .config("spark.sql.session.timeZone", ZONA)
+             .config("spark.sql.session.timeZone", "UTC")
              .config("spark.sql.execution.arrow.pyspark.enabled", "false")
              .config("spark.ui.enabled", "false")
              .getOrCreate())
@@ -85,17 +86,28 @@ def leer(capa, tabla):
 
 
 def a_pandas(capa, tabla, sin_metadatos=True):
-    pdf = leer(capa, tabla).toPandas()
+    df = leer(capa, tabla)
+    fechas = [f.name for f in df.schema.fields if isinstance(f.dataType, DateType)]
+    pdf = df.toPandas()
+    for c in fechas:
+        pdf[c] = pd.to_datetime(pdf[c])
     if sin_metadatos:
         pdf = pdf[[c for c in pdf.columns if not c.startswith("_")]]
     return pdf
 
 
 def desde_pandas(pdf):
+    """pandas -> Spark. Las fechas de día completo pasan como DATE y las fechas con hora como texto ISO,
+    para que ninguna conversión de zona horaria las modifique."""
     pdf = pdf.copy()
     for c in pdf.columns:
         t = str(pdf[c].dtype)
-        if t in ("string", "str", "boolean", "object") or t.startswith("Int"):
+        if t.startswith("datetime64"):
+            s = pdf[c]
+            con_hora = (s.dropna() != s.dropna().dt.normalize()).any()
+            valores = s.dt.strftime("%Y-%m-%d %H:%M:%S") if con_hora else s.dt.date
+            pdf[c] = valores.astype(object).where(s.notna(), None)
+        elif t in ("string", "str", "boolean", "object") or t.startswith("Int"):
             pdf[c] = pdf[c].astype(object).where(pdf[c].notna(), None)
     try:
         return spark.createDataFrame(pdf)

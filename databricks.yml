@@ -1,0 +1,47 @@
+# Job de la cadena de datos (Databricks Asset Bundle).
+# Despliegue y ejecución: databricks bundle deploy && databricks bundle run cadena_retencion
+bundle:
+  name: multitienda-retencion
+
+variables:
+  catalogo:
+    description: Catálogo de Unity Catalog donde viven los esquemas bronce, plata, oro y control
+    default: workspace
+
+resources:
+  jobs:
+    cadena_retencion:
+      name: "Multitienda del Sur - cadena de retención"
+      max_concurrent_runs: 1
+      parameters:
+        - name: catalogo
+          default: ${var.catalogo}
+        - name: url_ipc
+          default: https://mindicador.cl/api/ipc/2025
+        - name: id_corrida
+          default: "{{job.run_id}}"
+      tasks:
+        - task_key: preparar_entorno
+          notebook_task:
+            notebook_path: ./cadena/00_preparar_entorno.py
+        - task_key: bronce
+          depends_on: [{task_key: preparar_entorno}]
+          notebook_task:
+            notebook_path: ./cadena/01_bronce.py
+        - task_key: plata
+          depends_on: [{task_key: bronce}]
+          notebook_task:
+            notebook_path: ./cadena/02_plata.py
+        - task_key: oro
+          depends_on: [{task_key: plata}]
+          notebook_task:
+            notebook_path: ./cadena/03_oro.py
+        - task_key: semantica
+          depends_on: [{task_key: oro}]
+          notebook_task:
+            notebook_path: ./cadena/04_semantica.py
+
+targets:
+  dev:
+    default: true
+    mode: development

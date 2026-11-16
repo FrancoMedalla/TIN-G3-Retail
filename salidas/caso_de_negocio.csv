@@ -1,7 +1,10 @@
-,valor
-clientes perdidos (90 días),285.0
-gasto 1er semestre de los perdidos ($ dic-2025),19694099.0
-% de la venta identificada del 1er semestre,0.5613528918635509
-gasto mensual promedio por cliente perdido ($ dic-2025),11517.0
-clientes que equivalen a +10 pts de retención,49.0
-venta anual asociada a +10 pts de retención ($ dic-2025),6772006.0
+﻿concepto,valor,unidad
+clientes_perdidos_90_dias,285.0,clientes
+venta_1er_semestre_perdidos,19694099.0,$ dic-2025
+margen_1er_semestre_perdidos,5897332.0,$ dic-2025
+pct_venta_identificada_1er_semestre,0.5613528918635509,proporción
+venta_mensual_por_cliente_perdido,11517.0,$ dic-2025
+margen_mensual_por_cliente_perdido,3449.0,$ dic-2025
+clientes_por_10_puntos_de_retencion,49.0,clientes
+venta_anual_por_10_puntos,6772006.0,$ dic-2025
+margen_anual_por_10_puntos,2027855.0,$ dic-2025

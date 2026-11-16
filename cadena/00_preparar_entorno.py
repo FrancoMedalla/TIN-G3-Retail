@@ -3,15 +3,25 @@
 # MAGIC # 00 · Preparación del entorno
 # MAGIC Crea los esquemas `bronce`, `plata`, `oro` y `control`, el Volume `bronce.fuentes` (archivos de origen) y el
 # MAGIC Volume `oro.salidas` (cifras en CSV), y copia las fuentes desde la carpeta `data/` del repositorio.
-# MAGIC El respaldo del IPC solo se copia si el Volume no tiene uno, para no reemplazar un respaldo más reciente.
+# MAGIC El respaldo del IPC del Volume se conserva si tiene fecha de descarga, para no reemplazar uno más reciente;
+# MAGIC si no la tiene, se reemplaza por el del repositorio.
 # MAGIC Puede ejecutarse cualquier número de veces.
 
 # COMMAND ----------
 
+import json
 import os
 import shutil
 
 from comun import CAPAS, CATALOGO, DIR_FUENTES, DIR_SALIDAS, EN_DATABRICKS, RAIZ_REPO, spark
+
+def tiene_fecha(ruta):
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            return bool(json.load(f).get("fecha_descarga"))
+    except (OSError, ValueError):
+        return False
+
 
 ARCHIVOS = ["origen_pos.sqlite", "origen_maestro_productos.csv", "origen_promociones.json",
             "ipc_2025_respaldo.json"]
@@ -24,8 +34,8 @@ if EN_DATABRICKS:
     origen = os.path.join(RAIZ_REPO, "data")
     for archivo in ARCHIVOS:
         destino = os.path.join(DIR_FUENTES, archivo)
-        if archivo == "ipc_2025_respaldo.json" and os.path.exists(destino):
-            print(f"{archivo} ya está en el Volume; se conserva")
+        if archivo == "ipc_2025_respaldo.json" and tiene_fecha(destino):
+            print(f"{archivo} ya está en el Volume con fecha de descarga; se conserva")
         elif os.path.exists(os.path.join(origen, archivo)):
             shutil.copyfile(os.path.join(origen, archivo), destino)
             print(f"Copiado {archivo} -> {destino}")

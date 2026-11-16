@@ -31,6 +31,12 @@ def param(keyword, defecto):
 P_VENTANA, P_TIPO = param("ventana", "90"), param("tipo", "Todos")
 P_COSTO, P_CUPON = param("costo_contacto", "100"), param("cupon", "10")
 
+ORIGEN_IPC = ("CASE WHEN origen_ipc = 'api' THEN 'API de mindicador.cl' "
+              "WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'respaldo sin fecha' "
+              "ELSE concat('respaldo del ', fecha_respaldo_ipc) END")
+ORIGEN_IPC_TITULO = ORIGEN_IPC.replace("API de mindicador.cl", "API mindicador.cl").replace("'respaldo", "'Respaldo")
+ORIGEN_IPC_CORTO = ORIGEN_IPC.replace("API de mindicador.cl", "API").replace("'respaldo", "'Respaldo")
+
 DATASETS = {
     "opciones_ventana": ("Opciones de ventana", "SELECT explode(array('30', '90', '180')) AS ventana", []),
     "opciones_tipo": ("Opciones de tipo de cliente",
@@ -134,12 +140,9 @@ SELECT
 FROM y
 """, [P_COSTO, P_CUPON]),
     "estado": ("Estado de la última corrida", f"""
-SELECT concat('Fuente: ', fuente, '. Actualizado: ', fecha_hora, ' (corrida ', id_corrida, '). Dueño del dato: ',
-              dueno_dato, '. Pruebas de calidad: ', CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING),
-              ' en verde. IPC desde ',
-              CASE WHEN origen_ipc = 'api' THEN 'la API de mindicador.cl'
-                   ELSE concat('el respaldo descargado el ', fecha_respaldo_ipc, ' (la API no respondió)') END,
-              '.') AS pie
+SELECT concat('Fuente: POS, maestro de productos, campañas e IPC (mindicador.cl), 2025 · Dueño del dato: ',
+              dueno_dato, ' · Actualizado: ', substr(fecha_hora, 1, 16), ' · Pruebas: ', CAST(pruebas_ok AS STRING),
+              ' de ', CAST(pruebas AS STRING), ' · IPC: ', {ORIGEN_IPC}) AS pie
 FROM {CAT}.control.estado_corrida
 ORDER BY fecha_hora DESC
 LIMIT 1
@@ -188,17 +191,18 @@ GROUP BY tipo_cliente
     "pruebas": ("Pruebas de la última corrida publicada", f"""
 SELECT capa, id_prueba, fuente_o_metrica, que_verifica,
   CASE WHEN severidad = 'bloquea' THEN 'Bloquea' ELSE 'Advierte' END AS severidad,
-  CASE WHEN resultado = 'pasó' THEN 'Aprobada' ELSE 'Falló' END AS resultado,
+  CASE WHEN resultado = 'pasó' THEN 'Aprobada' WHEN severidad = 'bloquea' THEN 'Falló' ELSE 'Advertencia' END
+    AS resultado,
   filas_que_fallan, accion_si_falla
 FROM {CAT}.control.pruebas_resultados
 WHERE id_corrida = (SELECT id_corrida FROM {CAT}.control.estado_corrida ORDER BY fecha_hora DESC LIMIT 1)
-ORDER BY CASE capa WHEN 'bronce' THEN 1 WHEN 'plata' THEN 2 WHEN 'oro' THEN 3 ELSE 4 END, id_prueba
+ORDER BY CASE WHEN resultado = 'Aprobada' THEN 1 ELSE 0 END,
+  CASE capa WHEN 'bronce' THEN 1 WHEN 'plata' THEN 2 WHEN 'oro' THEN 3 ELSE 4 END, id_prueba
 """, []),
     "resumen_calidad": ("Resumen de calidad de la última corrida", f"""
 SELECT concat(CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING)) AS aprobadas_texto,
   CAST(avisos AS STRING) AS avisos_texto,
-  CASE WHEN origen_ipc = 'api' THEN 'API mindicador.cl'
-       ELSE concat('Respaldo del ', fecha_respaldo_ipc) END AS origen_ipc_texto,
+  {ORIGEN_IPC_TITULO} AS origen_ipc_texto,
   fecha_hora AS actualizado
 FROM {CAT}.control.estado_corrida
 ORDER BY fecha_hora DESC
@@ -207,7 +211,7 @@ LIMIT 1
     "corridas": ("Historial de corridas", f"""
 SELECT id_corrida, fecha_hora,
   concat(CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING)) AS pruebas_aprobadas,
-  CASE WHEN origen_ipc = 'api' THEN 'API' ELSE concat('Respaldo del ', fecha_respaldo_ipc) END AS origen_ipc
+  {ORIGEN_IPC_CORTO} AS origen_ipc
 FROM {CAT}.control.estado_corrida
 ORDER BY fecha_hora DESC
 LIMIT 10
@@ -324,7 +328,7 @@ def tabla(nombre, ds, columnas, titulo, p):
         "disaggregated": True}}], "spec": spec}, "position": p}
 
 
-PCT = {"type": "number-percent", "decimalPlaces": {"type": "max", "places": 1}}
+PCT = {"type": "number-percent", "decimalPlaces": {"type": "exact", "places": 1}}
 PARAM_PRINCIPAL = ["kpi", "cascada", "tiendas"]
 
 pagina_principal = [

@@ -151,7 +151,7 @@ meses = {pd.Timestamp(f).tz_convert("America/Santiago").month for f, *_ in filas
 pruebas.verificar("B-API-01", "IPC (API)", "La serie trae los 12 meses de 2025", len(meses) == 12, 12 - len(meses))
 pruebas.verificar("B-API-02", "IPC (API)", "El IPC viene de la API y no del respaldo", origen_ipc == "api",
                   severidad="avisa",
-                  accion="Se usa el respaldo del Volume; el pie del tablero indica 'IPC desde respaldo'")
+                  accion="Se usa el respaldo del Volume; el pie del tablero indica la fecha del respaldo")
 
 # COMMAND ----------
 

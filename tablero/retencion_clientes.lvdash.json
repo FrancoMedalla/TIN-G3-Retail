@@ -271,12 +271,9 @@
       "name": "estado",
       "displayName": "Estado de la última corrida",
       "queryLines": [
-        "SELECT concat('Fuente: ', fuente, '. Actualizado: ', fecha_hora, ' (corrida ', id_corrida, '). Dueño del dato: ',\n",
-        "              dueno_dato, '. Pruebas de calidad: ', CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING),\n",
-        "              ' en verde. IPC desde ',\n",
-        "              CASE WHEN origen_ipc = 'api' THEN 'la API de mindicador.cl'\n",
-        "                   ELSE concat('el respaldo descargado el ', fecha_respaldo_ipc, ' (la API no respondió)') END,\n",
-        "              '.') AS pie\n",
+        "SELECT concat('Fuente: POS, maestro de productos, campañas e IPC (mindicador.cl), 2025 · Dueño del dato: ',\n",
+        "              dueno_dato, ' · Actualizado: ', substr(fecha_hora, 1, 16), ' · Pruebas: ', CAST(pruebas_ok AS STRING),\n",
+        "              ' de ', CAST(pruebas AS STRING), ' · IPC: ', CASE WHEN origen_ipc = 'api' THEN 'API de mindicador.cl' WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'respaldo sin fecha' ELSE concat('respaldo del ', fecha_respaldo_ipc) END) AS pie\n",
         "FROM workspace.control.estado_corrida\n",
         "ORDER BY fecha_hora DESC\n",
         "LIMIT 1\n"
@@ -341,11 +338,13 @@
       "queryLines": [
         "SELECT capa, id_prueba, fuente_o_metrica, que_verifica,\n",
         "  CASE WHEN severidad = 'bloquea' THEN 'Bloquea' ELSE 'Advierte' END AS severidad,\n",
-        "  CASE WHEN resultado = 'pasó' THEN 'Aprobada' ELSE 'Falló' END AS resultado,\n",
+        "  CASE WHEN resultado = 'pasó' THEN 'Aprobada' WHEN severidad = 'bloquea' THEN 'Falló' ELSE 'Advertencia' END\n",
+        "    AS resultado,\n",
         "  filas_que_fallan, accion_si_falla\n",
         "FROM workspace.control.pruebas_resultados\n",
         "WHERE id_corrida = (SELECT id_corrida FROM workspace.control.estado_corrida ORDER BY fecha_hora DESC LIMIT 1)\n",
-        "ORDER BY CASE capa WHEN 'bronce' THEN 1 WHEN 'plata' THEN 2 WHEN 'oro' THEN 3 ELSE 4 END, id_prueba\n"
+        "ORDER BY CASE WHEN resultado = 'Aprobada' THEN 1 ELSE 0 END,\n",
+        "  CASE capa WHEN 'bronce' THEN 1 WHEN 'plata' THEN 2 WHEN 'oro' THEN 3 ELSE 4 END, id_prueba\n"
       ]
     },
     {
@@ -354,8 +353,7 @@
       "queryLines": [
         "SELECT concat(CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING)) AS aprobadas_texto,\n",
         "  CAST(avisos AS STRING) AS avisos_texto,\n",
-        "  CASE WHEN origen_ipc = 'api' THEN 'API mindicador.cl'\n",
-        "       ELSE concat('Respaldo del ', fecha_respaldo_ipc) END AS origen_ipc_texto,\n",
+        "  CASE WHEN origen_ipc = 'api' THEN 'API mindicador.cl' WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'Respaldo sin fecha' ELSE concat('Respaldo del ', fecha_respaldo_ipc) END AS origen_ipc_texto,\n",
         "  fecha_hora AS actualizado\n",
         "FROM workspace.control.estado_corrida\n",
         "ORDER BY fecha_hora DESC\n",
@@ -368,7 +366,7 @@
       "queryLines": [
         "SELECT id_corrida, fecha_hora,\n",
         "  concat(CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING)) AS pruebas_aprobadas,\n",
-        "  CASE WHEN origen_ipc = 'api' THEN 'API' ELSE concat('Respaldo del ', fecha_respaldo_ipc) END AS origen_ipc\n",
+        "  CASE WHEN origen_ipc = 'api' THEN 'API' WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'Respaldo sin fecha' ELSE concat('Respaldo del ', fecha_respaldo_ipc) END AS origen_ipc\n",
         "FROM workspace.control.estado_corrida\n",
         "ORDER BY fecha_hora DESC\n",
         "LIMIT 10\n"
@@ -1032,7 +1030,7 @@
                   "format": {
                     "type": "number-percent",
                     "decimalPlaces": {
-                      "type": "max",
+                      "type": "exact",
                       "places": 1
                     }
                   }
@@ -1844,7 +1842,7 @@
                   "format": {
                     "type": "number-percent",
                     "decimalPlaces": {
-                      "type": "max",
+                      "type": "exact",
                       "places": 1
                     }
                   }
@@ -2123,7 +2121,7 @@
                   "format": {
                     "type": "number-percent",
                     "decimalPlaces": {
-                      "type": "max",
+                      "type": "exact",
                       "places": 1
                     }
                   }

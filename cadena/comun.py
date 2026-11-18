@@ -219,7 +219,7 @@ METRICAS = {
     "tasa_retencion": ("SUM(retenido) / SUM(activo_jun)",
                        "Tasa de retención semestral: activos al 30-jun que siguen activos al 31-dic / activos al 30-jun"),
     "tasa_reposicion": ("SUM(ganado) / SUM(activo_dic)",
-                        "Reposición: activos al 31-dic que no estaban activos al 30-jun / activos al 31-dic"),
+                        "Tasa de reposición: activos al 31-dic que no estaban activos al 30-jun / activos al 31-dic"),
     "activos_jun": ("SUM(activo_jun)", "Clientes activos al 30-jun"),
     "retenidos": ("SUM(retenido)", "Activos al 30-jun que siguen activos al 31-dic"),
     "perdidos": ("SUM(perdido)", "Activos al 30-jun que no están activos al 31-dic"),

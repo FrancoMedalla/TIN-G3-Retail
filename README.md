@@ -40,7 +40,8 @@ La cadena integra cuatro fuentes (POS en SQLite, maestro de productos en CSV, ca
 | control | Resultados de pruebas, bitácoras, cobertura, linaje y estado de cada corrida | `control.pruebas_resultados`, `control.bitacora_carga`, `control.bitacora_supuestos`, `control.cobertura`, `control.linaje_metrica`, `control.estado_corrida` |
 
 - **Carga completa:** cada corrida reconstruye las tablas de datos. Dos corridas con las mismas fuentes producen las mismas claves y cifras. Las tablas de `control` acumulan una entrada por corrida.
-- **Pruebas:** cada capa valida sus datos antes de publicarlos. Una prueba bloqueante que falla detiene el Job sin modificar la capa, por lo que el tablero conserva la última corrida válida. Las pruebas de advertencia permiten continuar y quedan indicadas en el pie del tablero.
+- **Bitácora:** 41 reglas (25 de limpieza, 8 de modelo y 8 de métrica), cada una con su responsable y fecha; se regenera en cada corrida en `control.bitacora_supuestos`.
+- **Pruebas:** 70 pruebas en las cuatro capas; cada capa valida sus datos antes de publicarlos. Una prueba bloqueante que falla detiene el Job sin modificar la capa, por lo que el tablero conserva la última corrida válida. Las pruebas de advertencia permiten continuar y quedan indicadas en el pie del tablero.
 - **Falla de la API:** cuando la API responde, la respuesta se guarda como respaldo con su fecha de descarga (`ipc_2025_respaldo.json` en el Volume `bronce.fuentes`). Tras tres intentos fallidos se usa ese respaldo; el origen y la fecha quedan en `control.bitacora_carga` y en el pie del tablero. Sin respaldo, la corrida se detiene.
 - **Campaña de contacto:** `oro.contacto_campanas` simula, con las visitas de 2025, campañas semanales, quincenales y mensuales que contactan a quien cumple 34 días sin comprar, y calcula su costo con las cifras informadas por Marketing (mensaje de $100, 4 horas de preparación por campaña a $15.000 la hora, cupón de 10% con tope de $5.000 y canje de 15%). Los supuestos están en `comun.py` y en las reglas K07 y K08 de la bitácora.
 - **Dueños:** Marketing es dueño del tablero; el área del ERP responde por la extracción de los datos; la Gerencia Comercial es dueña de la definición de cliente activo.
@@ -99,9 +100,9 @@ Al final de la corrida se imprime `Corrida <id> publicada: 70/70 pruebas en verd
 | Boletas en origen | 6.338 |
 | Visitas identificadas usadas en la retención | 5.385 (85,0% del origen) |
 | Filas de `fact_venta_linea` | 14.532 |
-| Retención con ventana de 90 días | 41,5% (202 de 487) |
-| Reposición con ventana de 90 días | 69,4% (459 de 661): la cadena repone |
-| Retención con ventanas de 180 y 30 días | 58,6% y 18,6% |
+| Tasa de retención semestral (90 días) | 41,5% (202 de 487) |
+| Tasa de reposición (90 días) | 69,4% (459 de 661): la cadena repone |
+| Tasa de retención semestral con 180 y 30 días | 58,6% y 18,6% |
 | Margen anual por cada 10 puntos de retención | $2,03 millones (pesos de diciembre de 2025) |
 | Campaña mensual de contacto | $1,26 millones al año; cada campaña se paga si reactiva 3 de 148 contactados |
 

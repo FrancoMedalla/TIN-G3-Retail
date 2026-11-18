@@ -26,6 +26,15 @@ registrar = bit.registrar
 pruebas = Pruebas("semantica")
 C1, C2 = pd.Timestamp(CORTE_1), pd.Timestamp(CORTE_2)
 
+
+def pct(x, decimales=1):
+    return f"{x * 100:.{decimales}f}%".replace(".", ",")
+
+
+def dec(x, decimales=1):
+    return f"{x:.{decimales}f}".replace(".", ",")
+
+
 fact = a_pandas("oro", "fact_venta_linea")
 dim_cliente, dim_tienda = a_pandas("oro", "dim_cliente"), a_pandas("oro", "dim_tienda")
 dim_fecha = a_pandas("oro", "dim_fecha")
@@ -169,12 +178,13 @@ por_tienda["lectura"] = np.where(por_tienda.ic95_superior < por_tienda.tasa_cade
                                           "No concluyente"))
 
 h, n = por_tipo.query("ventana_dias == 90").set_index("tipo_cliente"), sens.query("ventana_dias == 90").set_index("tipo_cliente")
-brecha_todos = h.loc["Nuevo 2025", "tasa_retencion"] - h.loc["Base heredada", "tasa_retencion"]
-brecha_k05 = (n.loc["Nuevo 2025", "tasa_retencion_sin_alta_posterior"]
-              - n.loc["Base heredada", "tasa_retencion_sin_alta_posterior"])
+# La brecha se calcula entre las tasas publicadas (redondeadas a una décima), como se informa.
+brecha_todos = round(h.loc["Nuevo 2025", "tasa_retencion"], 3) - round(h.loc["Base heredada", "tasa_retencion"], 3)
+brecha_k05 = (round(n.loc["Nuevo 2025", "tasa_retencion_sin_alta_posterior"], 3)
+              - round(n.loc["Base heredada", "tasa_retencion_sin_alta_posterior"], 3))
 registrar("K05", "métrica", "Sensibilidad de la antigüedad: retención por tipo de cliente con y sin los clientes con "
           "alta posterior a su primera compra",
-          f"La brecha nuevos - heredada pasa de {brecha_todos * 100:.1f} a {brecha_k05 * 100:.1f} "
+          f"La brecha nuevos - heredada pasa de {dec(brecha_todos * 100)} a {dec(brecha_k05 * 100)} "
           "puntos; la base heredada no cambia porque esos clientes tienen el alta en 2025",
           int(alta_post.sum()), "La brecha por antigüedad no es concluyente; la conclusión de la P1 (repone) no cambia",
           "medido")
@@ -323,9 +333,9 @@ elegida = contacto.set_index("frecuencia").loc[FRECUENCIA_CAMPANA]
 res = metrica.set_index("ventana_dias")
 misma = res.loc[90, "conclusion"] == res.loc[180, "conclusion"]
 registrar("K01", "métrica", "Ventana de actividad de 90 días (alternativa 180; referencia 30)",
-          f"Mediana entre compras {gaps.median():.0f} días; {(gaps > 90).mean():.1%} de las pausas superan 90 días "
-          f"y {(gaps > 30).mean():.1%} superan 30", int(res.loc[90, "activos_jun"]),
-          f"Con 180 días la retención sube a {res.loc[180, 'tasa_retencion']:.1%}; la conclusión "
+          f"Mediana entre compras {gaps.median():.0f} días; {pct((gaps > 90).mean())} de las pausas superan 90 días "
+          f"y {pct((gaps > 30).mean())} superan 30", int(res.loc[90, "activos_jun"]),
+          f"Con 180 días la retención sube a {pct(res.loc[180, 'tasa_retencion'])}; la conclusión "
           f"{'se mantiene' if misma else 'cambia'}", "verbalizado (creencia de 30 días) y medido")
 registrar("K02", "métrica", "Cortes al 30-jun y al 31-dic para que las ventanas no se traslapen",
           "El 30-jun es el primer cierre de mes con 180 días de historia y el 31-dic es el último dato; que coincidan "
@@ -335,9 +345,9 @@ vt = vis.merge(dim_fecha[["fecha_key", "trimestre"]], on="fecha_key")
 t2, t4 = set(vt[vt.trimestre == "T2"].cliente_key), set(vt[vt.trimestre == "T4"].cliente_key)
 ret_trim, rep_trim = len(t2 & t4) / len(t2), len(t4 - t2) / len(t4)
 registrar("K04", "métrica", "Ventana móvil de 90 días y no trimestre calendario (prueba de robustez: T2 frente a T4)",
-          f"Con trimestres calendario (dim_fecha.trimestre) la retención es {ret_trim:.1%} y la reposición "
-          f"{rep_trim:.1%}", len(t2),
-          f"Ninguno: la retención cambia {abs(ret_trim - res.loc[90, 'tasa_retencion']) * 100:.1f} puntos y la "
+          f"Con trimestres calendario (dim_fecha.trimestre) la retención es {pct(ret_trim)} y la reposición "
+          f"{pct(rep_trim)}", len(t2),
+          f"Ninguno: la retención cambia {dec(abs(ret_trim - res.loc[90, 'tasa_retencion']) * 100)} puntos y la "
           f"conclusión ({'repone' if rep_trim > UMBRAL_LECTURA else 'retiene'}) se mantiene", "medido")
 registrar("K07", "métrica", f"Costo del contacto = preparación por campaña ({HORAS_PREPARACION} h x "
           f"${miles(COSTO_HORA)}) + mensaje (${COSTO_CONTACTO} por cliente) + cupón canjeado ({CUPON:.0%} de la "

@@ -144,8 +144,8 @@ fact_venta_linea = f[["boleta_id", "linea_id", "fecha_key", "cliente_key", "tien
 pct_costo = fact_venta_linea.loc[fact_venta_linea.tiene_costo, "monto_linea"].sum() / fact_venta_linea.monto_linea.sum()
 registrar("M08", "fact_venta_linea", "El margen de la línea = monto cobrado - cantidad x costo unitario del maestro; "
           "sin costo, la línea queda fuera del margen",
-          f"El caso de negocio se expresa en margen y no en venta. El maestro tiene costo para el "
-          f"{pct_costo:.1%} de la venta", int((~fact_venta_linea.tiene_costo).sum()),
+          "El caso de negocio se expresa en margen y no en venta. El maestro tiene costo para el "
+          + f"{pct_costo * 100:.1f}".replace(".", ",") + "% de la venta", int((~fact_venta_linea.tiene_costo).sum()),
           "Si el costo del maestro no fuera el costo real, el margen cambiaría; la retención no", "medido")
 
 # COMMAND ----------

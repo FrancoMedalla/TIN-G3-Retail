@@ -238,11 +238,22 @@ DIMENSIONES = {
 REGLA_LECTURA = (f"La cadena REPONE si más del {UMBRAL_LECTURA:.0%} de los activos al 31-dic no estaban activos "
                  "al 30-jun; si no, RETIENE. Regla fijada antes de calcular.")
 
-# Ventana de contacto: se contacta al cliente que cumple DIA_CONTACTO días sin comprar (percentil 75 de las
-# pausas entre compras). Los costos son supuestos ajustables en el tablero.
-DIA_CONTACTO, DIA_FIN_CONTACTO = 34, 45
-COSTO_CONTACTO_SUPUESTO = 100
-CUPON_SUPUESTO = 0.10
+# Campaña de contacto (K07, K08). Se contacta a quien cumple DIA_CONTACTO días sin comprar (percentil 75 de las
+# pausas entre compras). Costos informados por Marketing en su respuesta del 17-nov-2026: mensaje entre $80 y $120,
+# preparación de 4 horas por campaña a $15.000 la hora, cupón de 10% con tope de $5.000 que cuesta solo si se
+# canjea (tasa de canje entre 10% y 15%; se usa la alta para no subestimar el costo).
+DIA_CONTACTO = 34
+COSTO_CONTACTO = 100
+CUPON, TOPE_CUPON = 0.10, 5000
+TASA_CANJE = 0.15
+HORAS_PREPARACION, COSTO_HORA = 4, 15000
+FRECUENCIAS = {"Semanal": ("7D", 52), "Quincenal": ("14D", 26), "Mensual": ("MS", 12)}
+FRECUENCIA_CAMPANA = "Mensual"
+
+# Dueños (respuesta de Marketing del 17-nov-2026).
+DUENO_TABLERO = "Marketing"
+DUENO_DATOS = "área del ERP"
+DUENO_DEFINICION = "Gerencia Comercial"
 
 # Cifras publicadas en el informe; la prueba S-MET-05 advierte si la cadena deja de reproducirlas.
 CIFRAS_PUBLICADAS = {30: (0.1860, 0.8609), 90: (0.4148, 0.6944), 180: (0.5864, 0.5870)}

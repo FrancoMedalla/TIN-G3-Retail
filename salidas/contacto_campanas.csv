@@ -1,0 +1,4 @@
+﻿frecuencia,orden,recomendada,campanas_al_anio,campanas_simuladas,contactos_por_campana,contactos_al_anio,dia_contacto_min,dia_contacto_mediana,dia_contacto_max,pct_vuelven_solos_90,horas_preparacion,costo_hora,costo_contacto,cupon,tope_cupon,tasa_canje,cupon_medio,costo_preparacion_anual,costo_mensajes_anual,costo_cupones_anual,costo_anual,costo_por_campana,margen_anual_por_cliente_reactivado,margen_anual_por_10_puntos,clientes_meta_10_puntos,clientes_para_pagar_al_anio,clientes_para_pagar_por_campana,se_paga_antes_de_la_meta
+Semanal,1,0,52,40,39.9,2076,34,37,40,0.5579,4,15000,100,0.1,5000,0.15,1363.8466,3120000,207600,424702,3752302,72160,41385,2027855,49,91,2,0
+Quincenal,2,0,26,20,75.1,1953,34,40,47,0.5465,4,15000,100,0.1,5000,0.15,1363.8466,1560000,195300,399539,2154839,82878,41385,2027855,49,53,3,0
+Mensual,3,1,12,9,148.3,1780,34,45,63,0.5269,4,15000,100,0.1,5000,0.15,1363.8466,720000,178000,364147,1262147,105179,41385,2027855,49,31,3,1

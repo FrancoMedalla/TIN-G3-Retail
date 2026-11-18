@@ -20,7 +20,7 @@ import generar_tablero as gt
 
 NARANJO, NARANJO_SUAVE, GRIS_OSCURO, GRIS, GRIS_CLARO = (gt.NARANJO, gt.NARANJO_SUAVE, gt.GRIS_OSCURO, gt.GRIS,
                                                          gt.GRIS_CLARO)
-TABLAS = [("oro", "cliente_ventana"), ("oro", "contacto_34_45"), ("control", "cobertura"),
+TABLAS = [("oro", "cliente_ventana"), ("oro", "contacto_campanas"), ("control", "cobertura"),
           ("control", "estado_corrida"), ("control", "pruebas_resultados"), ("control", "linaje_metrica")]
 
 st.set_page_config(page_title="Multitienda del Sur · Retención de clientes", layout="wide")
@@ -46,14 +46,15 @@ def consultar(nombre, **parametros):
     return spark.sql(sql).toPandas()
 
 
-def barras(df, cat, val, color, colores, horizontal=False, agrupadas=False, pct=False, alto=320):
+def barras(df, cat, val, color, colores, horizontal=False, agrupadas=False, pct=False, alto=320,
+           decimales=0):
     """Barras con etiqueta directa; las etiquetas usan coma decimal."""
     df = df.copy()
-    df["etiqueta"] = df[val].map(lambda v: (f"{v:.1%}" if pct else f"{v:,.0f}").replace(",", "X").replace(".", ",")
-                                 .replace("X", "."))
+    df["etiqueta"] = df[val].map(lambda v: (f"{v:.1%}" if pct else f"{v:,.{decimales}f}").replace(",", "X")
+                                 .replace(".", ",").replace("X", "."))
     presentes = [c for c in colores if c in set(df[color])]
     escala = alt.Scale(domain=presentes, range=[colores[c] for c in presentes])
-    eje_val = alt.Axis(format=".0%" if pct else ",.0f", title=None, grid=True)
+    eje_val = alt.Axis(format=".0%" if pct else f",.{decimales}f", title=None, grid=True)
     leyenda = alt.Legend(orient="bottom", title=None, labelLimit=400)
     if horizontal:
         base = alt.Chart(df).encode(y=alt.Y(f"{cat}:N", title=None, sort=None, axis=alt.Axis(labelLimit=200)),
@@ -82,13 +83,13 @@ def tabla(df, columnas, alto="auto"):
     st.dataframe(df[list(columnas)].rename(columns=columnas), hide_index=True, width="stretch", height=alto)
 
 
-pag1, pag2, pag3 = st.tabs(["Retención y reposición", "Decisión de definición", "Calidad de datos"])
+pag1, pag2, pag3 = st.tabs(["Retención y reposición", "Decisiones", "Calidad de datos"])
 
 with pag1:
     st.markdown("## ¿La cadena está reteniendo a sus clientes o los está reponiendo?")
     st.caption("Multitienda del Sur · clientes identificados del programa · cortes al 30-jun y al 31-dic de 2025. "
-               "**Para** Gerencia Comercial y Marketing, **cada mes** al cierre: decidir a quién contactar y qué local "
-               "revisar.")
+               "**Para** Marketing (dueño del tablero), Gerencia Comercial y Finanzas, **cada mes** al cierre: decidir a "
+               "quién contactar y qué local revisar.")
     c1, c2, c3 = st.columns(3)
     ventana = c1.selectbox("Ventana de cliente activo (días)", ["30", "90", "180"], index=1)
     tipo = c2.selectbox("Tipo de cliente", ["Todos", "Base heredada", "Nuevo 2025"])
@@ -124,18 +125,28 @@ with pag1:
                    "Orden alfabético: sin ranking.")
 
     st.markdown("### Contactar a quien cumple 34 días sin comprar: cuánto vale y cuánto cuesta")
-    st.caption("Margen bruto en pesos de diciembre de 2025. El costo por contacto y el cupón son supuestos ajustables: "
-               "el caso no informa costos de contacto.")
-    f1, f2, _ = st.columns(3)
-    costo = f1.selectbox("Costo por contacto ($)", ["50", "100", "150", "200", "300", "500"], index=1)
-    cupon = f2.selectbox("Cupón para quien vuelve (%)", ["0", "5", "10", "15", "20"], index=2)
-    vc = consultar("vale_cuesta", costo_contacto=costo, cupon=cupon).iloc[0]
+    st.caption("Margen bruto en pesos de diciembre de 2025. Costos informados por Marketing (17-nov): mensaje de $80 a "
+               "$120, 4 horas de preparación por campaña a $15.000 la hora y cupón de 10% (tope $5.000) que solo "
+               "cuesta si se canjea.")
+    f1, f2, f3 = st.columns(3)
+    frecuencia = f1.selectbox("Frecuencia de la campaña", ["Mensual", "Quincenal", "Semanal"])
+    costo = f2.selectbox("Costo por mensaje ($)", ["80", "100", "120"], index=1)
+    canje = f3.selectbox("Clientes contactados que canjean el cupón (%)", ["10", "12,5", "15"], index=2)
+    vc = consultar("vale_cuesta", costo_contacto=costo, canje=canje, frecuencia=frecuencia).iloc[0]
     v1, v2, v3 = st.columns(3)
-    v1.metric("Vale: margen anual por cada 10 puntos de retención", vc.vale_texto)
-    v2.metric("Cuesta: contactos y cupones en un año", vc.cuesta_texto)
-    v3.metric("Se paga si recupera", vc.equilibrio_clientes)
+    v1.metric("Vale: margen anual de 10 puntos más de retención (49 clientes)", vc.vale_texto)
+    v2.metric("Cuesta: la campaña durante un año", vc.cuesta_texto)
+    v3.metric("Cada campaña se paga si reactiva", vc.equilibrio_clientes)
     v3.caption(vc.equilibrio_detalle)
-    st.caption(f"Contactos al año: {vc.contactos_texto} · margen por cliente recuperado: {vc.margen_cliente_texto}")
+    d = st.columns(6)
+    for col, (titulo, valor) in zip(d, [("Costo por campaña", vc.costo_campana_texto),
+                                        ("Contactos por campaña", vc.contactos_texto),
+                                        ("Días sin comprar al contacto", vc.dia_texto),
+                                        ("Vuelven solos en 90 días", vc.vuelven_texto),
+                                        ("Margen anual por cliente reactivado", vc.margen_cliente_texto),
+                                        ("Clientes que pagan el año", vc.clientes_anio_texto)]):
+        col.caption(titulo)
+        col.markdown(f"**{valor}**")
 
     st.markdown("**Detalle por local**")
     tabla(tie, {"tienda": "Local principal", "activos_jun": "Activos al 30-jun",
@@ -175,6 +186,33 @@ with pag2:
                     "después de su primera compra; todos tienen el alta en 2025, así que la base heredada no cambia. "
                     "Sin ellos, la brecha entre nuevos y heredada se reduce de 8,9 a 3,7 puntos: no es concluyente. "
                     "La conclusión (repone) no depende de esta definición.")
+
+    st.markdown("## Decisión de frecuencia de la campaña de contacto")
+    st.caption("Preparar una campaña cuesta lo mismo sin importar a cuántos clientes llegue, así que la frecuencia "
+               "decide el costo. Costos con $100 por mensaje y canje de 15%.")
+    e1, e2 = st.columns([2, 1])
+    with e1:
+        st.markdown("**Costo anual de la campaña según su frecuencia ($ MM, pesos de diciembre de 2025)**")
+        fc = consultar("frecuencias_costos")
+        fc["orden"] = fc.componente.map({"Preparación (4 h por campaña)": 1, "Cupones canjeados": 2, "Mensajes": 3})
+        fc = fc.sort_values(["frecuencia", "orden"])
+        colores = {"Preparación (4 h por campaña)": NARANJO, "Cupones canjeados": GRIS, "Mensajes": GRIS_CLARO}
+        grafico = barras(fc, "frecuencia", "millones", "componente", colores, decimales=2)
+        st.altair_chart(grafico, width="stretch")
+        st.caption("En naranjo, la preparación: 4 horas de un analista por campaña, a $15.000 la hora.")
+    with e2:
+        st.markdown("### Por qué mensual")
+        st.markdown("Solo la campaña mensual se paga antes de llegar a la meta: necesita 31 clientes reactivados al "
+                    "año (3 por campaña) y la meta son 49. La semanal necesita 91 y la quincenal 53. Además, es el "
+                    "ritmo con que Marketing ya trabaja.\n\n"
+                    "**Lo que se cede:** el contacto llega entre los días 34 y 63 sin comprar (mediana 45). Si la "
+                    "cadena entrega la lista de clientes y la preparación baja, una frecuencia mayor acerca el contacto "
+                    "al día 34.")
+    tabla(consultar("frecuencias"), {"frecuencia": "Frecuencia", "campanas": "Campañas al año",
+                                     "contactos": "Contactos al año", "dias": "Días sin comprar al contacto",
+                                     "preparacion": "Preparación", "mensajes": "Mensajes", "cupones": "Cupones",
+                                     "total": "Costo anual", "clientes": "Clientes que lo pagan",
+                                     "antes_de_la_meta": "¿Antes de la meta (49)?"})
 
 with pag3:
     st.markdown("## Calidad de datos y trazabilidad")

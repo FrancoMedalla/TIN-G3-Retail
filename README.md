@@ -36,12 +36,14 @@ La cadena integra cuatro fuentes (POS en SQLite, maestro de productos en CSV, ca
 | bronce | Fuentes sin transformar, con origen y corrida | `bronce.pos_*`, `bronce.productos`, `bronce.promo_*`, `bronce.ipc_mensual` |
 | plata | Datos tipados y limpios según las reglas de la bitácora | `plata.boletas`, `plata.detalle`, `plata.clientes`, `plata.productos` |
 | oro | Esquema en estrella: `fact_venta_linea` y dimensiones de fecha, cliente, tienda, producto y campaña | `oro.fact_venta_linea`, `oro.dim_*`, `oro.diccionario_datos` |
-| semántica | Estado de cada cliente por ventana, metric view y tablas de consumo | `oro.cliente_ventana`, `oro.mv_retencion`, `oro.metrica_retencion`, `oro.retencion_por_*`, `oro.caso_negocio` |
+| semántica | Estado de cada cliente por ventana, metric view y tablas de consumo | `oro.cliente_ventana`, `oro.mv_retencion`, `oro.metrica_retencion`, `oro.retencion_por_*`, `oro.caso_negocio`, `oro.contacto_campanas` |
 | control | Resultados de pruebas, bitácoras, cobertura, linaje y estado de cada corrida | `control.pruebas_resultados`, `control.bitacora_carga`, `control.bitacora_supuestos`, `control.cobertura`, `control.linaje_metrica`, `control.estado_corrida` |
 
 - **Carga completa:** cada corrida reconstruye las tablas de datos. Dos corridas con las mismas fuentes producen las mismas claves y cifras. Las tablas de `control` acumulan una entrada por corrida.
 - **Pruebas:** cada capa valida sus datos antes de publicarlos. Una prueba bloqueante que falla detiene el Job sin modificar la capa, por lo que el tablero conserva la última corrida válida. Las pruebas de advertencia permiten continuar y quedan indicadas en el pie del tablero.
 - **Falla de la API:** cuando la API responde, la respuesta se guarda como respaldo con su fecha de descarga (`ipc_2025_respaldo.json` en el Volume `bronce.fuentes`). Tras tres intentos fallidos se usa ese respaldo; el origen y la fecha quedan en `control.bitacora_carga` y en el pie del tablero. Sin respaldo, la corrida se detiene.
+- **Campaña de contacto:** `oro.contacto_campanas` simula, con las visitas de 2025, campañas semanales, quincenales y mensuales que contactan a quien cumple 34 días sin comprar, y calcula su costo con las cifras informadas por Marketing (mensaje de $100, 4 horas de preparación por campaña a $15.000 la hora, cupón de 10% con tope de $5.000 y canje de 15%). Los supuestos están en `comun.py` y en las reglas K07 y K08 de la bitácora.
+- **Dueños:** Marketing es dueño del tablero; el área del ERP responde por la extracción de los datos; la Gerencia Comercial es dueña de la definición de cliente activo.
 - **Linaje:** `control.linaje_metrica` sigue cada campo que entra en la métrica desde su origen, pasando por la regla de limpieza y el modelo, hasta la pantalla que lo muestra.
 
 ## Ejecución en Databricks
@@ -59,8 +61,8 @@ Si el catálogo principal del workspace tiene otro nombre, se debe ajustar el pa
 
 El tablero lee la metric view `oro.mv_retencion` y las tablas de `oro` y `control`, de modo que muestra siempre la última corrida de la cadena.
 
-- **Pantalla principal:** pregunta, filtros de ventana (30, 90 o 180 días) y tipo de cliente, retención y reposición con su comparación, regla de lectura, cobertura, base activa de junio y diciembre, retención por local con intervalo de confianza, valor y costo del contacto entre los días 34 y 45 (con costo por contacto y cupón ajustables), detalle por local y pie con fuente, fecha de actualización, dueño del dato y resultado de las pruebas.
-- **Decisión de definición:** las tres ventanas lado a lado y la sensibilidad de la retención por antigüedad.
+- **Retención y reposición:** pregunta, audiencia y frecuencia; filtros de ventana (30, 90 o 180 días) y tipo de cliente; retención y reposición con su comparación, regla de lectura y cobertura; base activa de junio y diciembre; retención por local con intervalo de confianza; valor y costo de la campaña de contacto, con frecuencia, costo por mensaje y tasa de canje ajustables, y clientes reactivados que la pagan; detalle por local; pie con fuente, dueños, fecha de actualización, resultado de las pruebas y origen del IPC.
+- **Decisiones:** las tres ventanas lado a lado, la sensibilidad de la retención por antigüedad y el costo de la campaña según su frecuencia (semanal, quincenal o mensual).
 - **Calidad de datos:** pruebas de la última corrida, historial de corridas, origen del IPC y linaje de la métrica.
 
 Importación:
@@ -90,7 +92,7 @@ streamlit run tablero/app_local.py
 
 ## Resultado esperado
 
-Al final de la corrida se imprime `Corrida <id> publicada: 65/65 pruebas en verde, IPC desde api`. Si la API no responde, el resultado es `64/65` con `IPC desde respaldo`.
+Al final de la corrida se imprime `Corrida <id> publicada: 70/70 pruebas en verde, IPC desde api`. Si la API no responde, el resultado es `69/70` con `IPC desde respaldo`.
 
 | Control | Valor esperado |
 |---|---|
@@ -100,7 +102,8 @@ Al final de la corrida se imprime `Corrida <id> publicada: 65/65 pruebas en verd
 | Retención con ventana de 90 días | 41,5% (202 de 487) |
 | Reposición con ventana de 90 días | 69,4% (459 de 661): la cadena repone |
 | Retención con ventanas de 180 y 30 días | 58,6% y 18,6% |
-| Margen anual por cada 10 puntos de retención | ≈ $2,0 millones (pesos de diciembre de 2025) |
+| Margen anual por cada 10 puntos de retención | $2,03 millones (pesos de diciembre de 2025) |
+| Campaña mensual de contacto | $1,26 millones al año; cada campaña se paga si reactiva 3 de 148 contactados |
 
 ## Problemas frecuentes
 

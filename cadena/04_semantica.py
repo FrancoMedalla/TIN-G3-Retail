@@ -9,12 +9,17 @@
 
 # COMMAND ----------
 
+import os
+import shutil
+
 import numpy as np
 import pandas as pd
 
-from comun import (COSTO_CONTACTO_SUPUESTO, CUPON_SUPUESTO, DIA_CONTACTO, DIA_FIN_CONTACTO, CIFRAS_PUBLICADAS, CORTE_1, CORTE_2, EN_DATABRICKS, ID_CORRIDA, METRICAS, REGLA_LECTURA,
+from comun import (CIFRAS_PUBLICADAS, CORTE_1, CORTE_2, COSTO_CONTACTO, COSTO_HORA, CUPON, DIA_CONTACTO,
+                   DUENO_DATOS, DUENO_DEFINICION, DUENO_TABLERO, EN_DATABRICKS, FRECUENCIA_CAMPANA, FRECUENCIAS,
+                   HORAS_PREPARACION, ID_CORRIDA, DIR_SALIDAS, METRICAS, REGLA_LECTURA, TASA_CANJE, TOPE_CUPON,
                    UMBRAL_LECTURA, VENTANA_BASE, VENTANAS, Bitacora, Pruebas, a_pandas, ahora, escribir_pandas,
-                   guardar_salida_csv, leer, nombre_tabla, spark, sql_metricas, yaml_metric_view)
+                   guardar_salida_csv, leer, nombre_tabla, ruta_local, spark, sql_metricas, yaml_metric_view)
 
 bit = Bitacora("semantica")
 registrar = bit.registrar
@@ -237,35 +242,77 @@ print(caso)
 
 # COMMAND ----------
 
-# MAGIC %md ## Contacto entre los días 34 y 45 sin compra
-# MAGIC Un episodio de contacto es una pausa en la que el cliente cumple 34 días sin comprar dentro de 2025. Para cada
-# MAGIC episodio se registra si el cliente volvió solo (antes de 45 o de 90 días) o si no volvió en 90 días (en riesgo).
+# MAGIC %md ## Campaña de contacto: frecuencia, costo y clientes que la pagan
+# MAGIC En cada campaña se contacta a quien cumplió 34 días sin comprar desde la campaña anterior y aún no vuelve.
+# MAGIC Se simulan tres frecuencias sobre las visitas de abril a diciembre (desde abril todo cliente tiene historia
+# MAGIC suficiente para medir sus días sin comprar) y se anualiza el promedio por campaña. Que el cliente vuelva solo
+# MAGIC se mide en las campañas con 90 días de observación posterior.
+# MAGIC
+# MAGIC Costo anual = preparación (campañas x horas x costo por hora) + mensajes (contactos x costo por contacto)
+# MAGIC + cupones canjeados (contactos x tasa de canje x cupón promedio con tope).
 
 # COMMAND ----------
 
-vc = vis.sort_values(["cliente_key", "fecha"]).copy()
-vc["siguiente"] = vc.groupby("cliente_key").fecha.shift(-1)
-vc["dias_pausa"] = (vc.siguiente - vc.fecha).dt.days
-vc["dias_observados"] = (C2 - vc.fecha).dt.days
-ep = vc[(vc.dias_pausa > DIA_CONTACTO) | (vc.siguiente.isna() & (vc.dias_observados > DIA_CONTACTO))]
-vuelve_45 = int(((ep.dias_pausa > DIA_CONTACTO) & (ep.dias_pausa <= DIA_FIN_CONTACTO)).sum())
-vuelve_90 = int(((ep.dias_pausa > DIA_FIN_CONTACTO) & (ep.dias_pausa <= 90)).sum())
-en_riesgo = int(((ep.dias_pausa > 90) | (ep.siguiente.isna() & (ep.dias_observados > 90))).sum())
-contacto = pd.DataFrame([{
-    "contactos_al_anio": len(ep), "clientes_contactados": int(ep.cliente_key.nunique()),
-    "vuelven_solos_antes_de_45": vuelve_45, "vuelven_solos_entre_46_y_90": vuelve_90,
-    "en_riesgo_no_vuelven_en_90": en_riesgo, "sin_observacion_suficiente": len(ep) - vuelve_45 - vuelve_90 - en_riesgo,
-    "venta_media_por_visita": round(vis.monto_boleta_real_dic2025.mean()),
-    "margen_anual_por_cliente_recuperado": round(mensual_margen * 12),
-    "margen_anual_por_10_puntos": round(por_10pp * mensual_margen * 12),
-    "costo_contacto_supuesto": COSTO_CONTACTO_SUPUESTO, "cupon_supuesto": CUPON_SUPUESTO,
-}])
-c0 = contacto.iloc[0]
-costo_total = (c0.contactos_al_anio * COSTO_CONTACTO_SUPUESTO
-               + (vuelve_45 + vuelve_90) * c0.venta_media_por_visita * CUPON_SUPUESTO)
-contacto["costo_anual_supuesto"] = round(costo_total)
-contacto["clientes_para_pagar_el_costo"] = int(np.ceil(costo_total / c0.margen_anual_por_cliente_recuperado))
-print(contacto.T)
+INICIO_SIMULACION = pd.Timestamp("2025-04-01")
+
+
+def miles(n):
+    return f"{n:,.0f}".replace(",", ".")
+
+
+margen_cliente = round(mensual_margen * 12)
+cupon_medio = float(np.minimum(CUPON * vis.monto_boleta_real_dic2025, TOPE_CUPON).mean())
+vf = vis[["cliente_key", "fecha"]].sort_values("fecha")
+
+
+def simular(codigo):
+    cortes = pd.date_range(INICIO_SIMULACION, C2, freq=codigo)
+    intervalo = (cortes[1] - cortes[0]).days
+    filas = []
+    for i, corte in enumerate(cortes):
+        desde = (corte - cortes[i - 1]).days if i else intervalo
+        ultima = vf[vf.fecha < corte].groupby("cliente_key").fecha.max()
+        dias = (corte - ultima).dt.days
+        elegidos = dias[(dias >= DIA_CONTACTO) & (dias < DIA_CONTACTO + desde)]
+        vuelta = vf[vf.fecha >= corte].groupby("cliente_key").fecha.min().reindex(elegidos.index)
+        filas.append(pd.DataFrame({"corte": corte, "cliente_key": elegidos.index, "dias_sin_comprar": elegidos.values,
+                                   "dias_hasta_volver": (vuelta - corte).dt.days.values}))
+    return cortes, pd.concat(filas, ignore_index=True)
+
+
+filas_frecuencia, contactos_simulados = [], {}
+for orden, (frecuencia, (codigo, por_anio)) in enumerate(FRECUENCIAS.items(), start=1):
+    cortes, ct = simular(codigo)
+    contactos_simulados[frecuencia] = ct
+    observables = ct[ct.corte + pd.Timedelta(days=90) <= C2]
+    por_campana = len(ct) / len(cortes)
+    al_anio = round(por_campana * por_anio)
+    preparacion = por_anio * HORAS_PREPARACION * COSTO_HORA
+    mensajes = al_anio * COSTO_CONTACTO
+    cupones = al_anio * TASA_CANJE * cupon_medio
+    total = preparacion + mensajes + cupones
+    filas_frecuencia.append({
+        "frecuencia": frecuencia, "orden": orden, "recomendada": int(frecuencia == FRECUENCIA_CAMPANA),
+        "campanas_al_anio": por_anio, "campanas_simuladas": len(cortes),
+        "contactos_por_campana": round(por_campana, 1), "contactos_al_anio": al_anio,
+        "dia_contacto_min": int(ct.dias_sin_comprar.min()), "dia_contacto_mediana": int(ct.dias_sin_comprar.median()),
+        "dia_contacto_max": int(ct.dias_sin_comprar.max()),
+        "pct_vuelven_solos_90": round(float((observables.dias_hasta_volver <= 90).mean()), 4),
+        "horas_preparacion": HORAS_PREPARACION, "costo_hora": COSTO_HORA, "costo_contacto": COSTO_CONTACTO,
+        "cupon": CUPON, "tope_cupon": TOPE_CUPON, "tasa_canje": TASA_CANJE, "cupon_medio": round(cupon_medio, 4),
+        "costo_preparacion_anual": round(preparacion), "costo_mensajes_anual": round(mensajes),
+        "costo_cupones_anual": round(cupones), "costo_anual": round(total), "costo_por_campana": round(total / por_anio),
+        "margen_anual_por_cliente_reactivado": margen_cliente,
+        "margen_anual_por_10_puntos": round(por_10pp * mensual_margen * 12),
+        "clientes_meta_10_puntos": int(por_10pp),
+        "clientes_para_pagar_al_anio": int(np.ceil(total / margen_cliente)),
+        "clientes_para_pagar_por_campana": int(np.ceil(total / por_anio / margen_cliente)),
+    })
+contacto = pd.DataFrame(filas_frecuencia)
+contacto["se_paga_antes_de_la_meta"] = (contacto.clientes_para_pagar_al_anio <= contacto.clientes_meta_10_puntos
+                                        ).astype(int)
+print(contacto.set_index("frecuencia").T)
+elegida = contacto.set_index("frecuencia").loc[FRECUENCIA_CAMPANA]
 
 # COMMAND ----------
 
@@ -292,12 +339,27 @@ registrar("K04", "métrica", "Ventana móvil de 90 días y no trimestre calendar
           f"{rep_trim:.1%}", len(t2),
           f"Ninguno: la retención cambia {abs(ret_trim - res.loc[90, 'tasa_retencion']) * 100:.1f} puntos y la "
           f"conclusión ({'repone' if rep_trim > UMBRAL_LECTURA else 'retiene'}) se mantiene", "medido")
-registrar("K07", "métrica", f"Contacto al cumplir {DIA_CONTACTO} días sin compra; costo = contactos x costo por contacto "
-          f"+ cupón de {CUPON_SUPUESTO:.0%} sobre la compra de quienes vuelven",
-          f"El 75% de las pausas termina antes de {DIA_CONTACTO} días. Costo por contacto (${COSTO_CONTACTO_SUPUESTO}) y "
-          "cupón son supuestos: el caso no trae costos de contacto; el tablero permite cambiarlos",
-          len(ep), "Si el contacto o el cupón costaran más, sube el número de clientes que hay que recuperar para "
-          "pagar la acción; el tablero muestra ese punto de equilibrio", "medido y supuesto")
+registrar("K07", "métrica", f"Costo del contacto = preparación por campaña ({HORAS_PREPARACION} h x "
+          f"${miles(COSTO_HORA)}) + mensaje (${COSTO_CONTACTO} por cliente) + cupón canjeado ({CUPON:.0%} de la "
+          f"compra, tope ${miles(TOPE_CUPON)}; canje {TASA_CANJE:.0%})",
+          "Cifras de Marketing (respuesta del 17-nov-2026): mensaje entre $80 y $120, preparación de 4 h por campaña, "
+          "cupón máximo de 10% con tope y canje entre 10% y 15%. Se usa el canje alto y se cobra el cupón también a "
+          "quien habría vuelto solo, para no subestimar el costo",
+          int(elegida.contactos_al_anio),
+          f"Con canje de 10% o mensaje de $80 el costo baja; el tablero permite cambiar ambos. El valor de un cliente "
+          f"reactivado supone un año de compras (${miles(margen_cliente)}); si fuera medio año, se necesitaría el "
+          "doble de clientes", "contraparte (Marketing) y supuesto declarado")
+f_txt = "; ".join(f"{r.frecuencia.lower()} ${r.costo_anual / 1e6:.2f} MM y {r.clientes_para_pagar_al_anio} clientes"
+                  .replace(".", ",") for r in contacto.itertuples())
+registrar("K08", "métrica", f"Campaña {FRECUENCIA_CAMPANA.lower()}: el día 1 de cada mes se contacta a quien cumplió "
+          f"{DIA_CONTACTO} días sin comprar desde la campaña anterior (contacto entre los días "
+          f"{int(elegida.dia_contacto_min)} y {int(elegida.dia_contacto_max)}, mediana {int(elegida.dia_contacto_mediana)})",
+          f"La preparación cuesta lo mismo por campaña, así que la frecuencia decide el costo anual ({f_txt}). Solo la "
+          f"mensual se paga antes de la meta ({int(por_10pp)} clientes) y es el ritmo con que Marketing ya trabaja",
+          int(elegida.campanas_al_anio),
+          "En la mitad de los casos el contacto llega después del día 45 sin comprar. Si la preparación se "
+          "automatiza (la cadena entrega la lista de clientes), una frecuencia mayor acerca el contacto al día 34",
+          "contraparte (Marketing), simulado con las visitas de 2025")
 registrar("K03", "métrica", "Tienda principal = tienda con más visitas del cliente en la ventana de junio",
           "La mayoría de los clientes compra en más de un local; se asigna uno para cortar la retención",
           int(res.loc[90, "activos_jun"]), "Un cliente repartido entre locales queda asignado solo a uno", "inferido")
@@ -314,7 +376,7 @@ LINAJE = [
     ("POS · boletas.fecha", "B02 (5 formatos de fecha), B03 (solo 2025)", "plata.boletas.fecha",
      "fact_venta_linea.fecha_key → dim_fecha.fecha",
      "Cliente activo: visita en los W días previos al corte (activo_jun, activo_dic)",
-     "tasa_retencion, tasa_reposicion", f"{KPI}; {CASCADA}; {LOCALES}; Decisión de definición"),
+     "tasa_retencion, tasa_reposicion", f"{KPI}; {CASCADA}; {LOCALES}; Decisiones; {VALE} (días sin comprar)"),
     ("POS · boletas.boleta_id", "B01 (duplicados exactos)", "plata.boletas.boleta_id",
      "fact_venta_linea.boleta_id", "Una boleta = una visita", "todas", "Todas"),
     ("POS · boletas.cliente_id", "B06 (anónimas fuera de la retención)", "plata.boletas.cliente_id",
@@ -333,7 +395,7 @@ LINAJE = [
      "Filtro de tipo de cliente; Sensibilidad de la antigüedad"),
     ("Maestro · costo_unitario", "P03 (texto a número), P04 (SKU repetido)", "plata.productos.costo_unitario",
      "fact_venta_linea.costo_linea, margen_linea (M08)", "Margen de los clientes perdidos y por recuperar",
-     "margen_anual_por_10_puntos, costo y equilibrio del contacto (K07)", VALE),
+     "margen_anual_por_10_puntos, margen por cliente reactivado", VALE),
     ("POS · boleta_detalle.cantidad", "D04 (cantidad negativa = devolución)", "plata.detalle.cantidad",
      "fact_venta_linea.cantidad → costo_linea", "Costo de la línea = cantidad × costo unitario",
      "margen_anual_por_10_puntos", VALE),
@@ -341,6 +403,9 @@ LINAJE = [
      "plata.ipc_mensual.factor_a_pesos_dic2025", "dim_fecha.factor_a_pesos_dic2025",
      "Montos y margen en pesos de diciembre de 2025", "margen_anual_por_10_puntos", f"{VALE}; pie (origen del IPC)"),
 ]
+LINAJE.append(("Respuesta de Marketing (17-nov) · costos de la campaña", "K07 (costos), K08 (frecuencia mensual)",
+               "—", "oro.contacto_campanas", "Costo anual y por campaña; clientes reactivados que la pagan",
+               "costo_anual, clientes_para_pagar_por_campana", f"{VALE}; Decisiones (frecuencia de la campaña)"))
 linaje = pd.DataFrame(LINAJE, columns=["campo_origen", "regla_limpieza", "campo_plata", "campo_modelo",
                                        "uso_en_la_metrica", "medida", "pantalla"])
 linaje.insert(0, "orden", range(1, len(linaje) + 1))
@@ -367,6 +432,20 @@ dif = max(abs(res.loc[w, "tasa_retencion"] - r) + abs(res.loc[w, "tasa_reposicio
 pruebas.verificar("S-MET-05", "Métrica", "La cadena reproduce las cifras publicadas en el informe (±0,1 punto)",
                   dif < 0.001, severidad="avisa",
                   accion="Seguir; el informe debe explicar el cambio en el registro de mejora")
+cs = contacto.set_index("frecuencia")
+pruebas.verificar("S-CON-01", "Campaña de contacto", "Nadie se contacta antes del día 34 sin comprar",
+                  (cs.dia_contacto_min >= DIA_CONTACTO).all())
+pruebas.verificar("S-CON-02", "Campaña de contacto",
+                  "Menos campañas implican más contactos por campaña (semanal < quincenal < mensual)",
+                  cs.loc["Semanal", "contactos_por_campana"] < cs.loc["Quincenal", "contactos_por_campana"]
+                  < cs.loc["Mensual", "contactos_por_campana"])
+pruebas.verificar("S-CON-03", "Campaña de contacto", "El costo anual es la suma de preparación, mensajes y cupones",
+                  (abs(cs.costo_preparacion_anual + cs.costo_mensajes_anual + cs.costo_cupones_anual - cs.costo_anual)
+                   <= 2).all())
+pruebas.verificar("S-CON-04", "Campaña de contacto", "El cupón promedio no supera el tope de $5.000",
+                  cupon_medio <= TOPE_CUPON)
+pruebas.verificar("S-CON-05", "Campaña de contacto", "Cada cliente se contacta a lo más una vez por campaña",
+                  not any(c.duplicated(["corte", "cliente_key"]).any() for c in contactos_simulados.values()))
 
 # COMMAND ----------
 
@@ -378,8 +457,14 @@ pruebas.cerrar()
 for tabla, df in {"metrica_retencion": metrica, "retencion_por_tipo": por_tipo, "sensibilidad_k05": sens,
                   "retencion_por_segmento": por_segmento, "retencion_por_tienda": por_tienda,
                   "evidencia_recompra_nuevos": recompra, "evidencia_clientes_mes": mensual,
-                  "pausas_entre_compras": pausas, "caso_negocio": caso, "contacto_34_45": contacto}.items():
+                  "pausas_entre_compras": pausas, "caso_negocio": caso, "contacto_campanas": contacto}.items():
     escribir_pandas(df, "oro", tabla)
+if EN_DATABRICKS:
+    spark.sql(f"DROP TABLE IF EXISTS {nombre_tabla('oro', 'contacto_34_45')}")
+else:
+    shutil.rmtree(ruta_local("oro", "contacto_34_45"), ignore_errors=True)
+if os.path.exists(os.path.join(DIR_SALIDAS, "contacto_34_45.csv")):
+    os.remove(os.path.join(DIR_SALIDAS, "contacto_34_45.csv"))
 bit.guardar()
 escribir_pandas(linaje, "control", "linaje_metrica")
 
@@ -399,7 +484,7 @@ estado = pd.DataFrame([{
     "pct_pruebas_ok": (ultima.resultado == "pasó").mean(),
     "cobertura_boletas": n_usadas / n_origen,
     "fuente": "POS, maestro de productos, campañas y IPC (mindicador.cl) de Multitienda del Sur, 2025",
-    "dueno_dato": "Gerencia Comercial",
+    "dueno_dato": DUENO_DATOS, "dueno_tablero": DUENO_TABLERO, "dueno_definicion": DUENO_DEFINICION,
     "regla_de_lectura": REGLA_LECTURA}])
 escribir_pandas(estado, "control", "estado_corrida", modo="append")
 
@@ -411,7 +496,7 @@ guardar_salida_csv(por_segmento, "retencion_por_segmento.csv", index=False)
 guardar_salida_csv(recompra, "recompra_90_nuevos_por_mes.csv", index=False)
 guardar_salida_csv(mensual, "clientes_y_venta_mensual_por_tipo.csv", index=False)
 guardar_salida_csv(caso, "caso_de_negocio.csv", index=False)
-guardar_salida_csv(contacto, "contacto_34_45.csv", index=False)
+guardar_salida_csv(contacto, "contacto_campanas.csv", index=False)
 guardar_salida_csv(cobertura, "cobertura.csv", index=False)
 guardar_salida_csv(pausas, "pausas_entre_compras.csv", index=False)
 guardar_salida_csv(bitacora, "bitacora_supuestos.csv", index=False)

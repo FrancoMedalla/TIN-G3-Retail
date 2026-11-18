@@ -16,16 +16,23 @@
     },
     {
       "name": "opciones_costo",
-      "displayName": "Opciones de costo por contacto",
+      "displayName": "Opciones de costo por mensaje",
       "queryLines": [
-        "SELECT explode(array('50', '100', '150', '200', '300', '500')) AS costo_contacto\n"
+        "SELECT explode(array('80', '100', '120')) AS costo_contacto\n"
       ]
     },
     {
-      "name": "opciones_cupon",
-      "displayName": "Opciones de cupón",
+      "name": "opciones_canje",
+      "displayName": "Opciones de tasa de canje",
       "queryLines": [
-        "SELECT explode(array('0', '5', '10', '15', '20')) AS cupon\n"
+        "SELECT explode(array('10', '12,5', '15')) AS canje\n"
+      ]
+    },
+    {
+      "name": "opciones_frecuencia",
+      "displayName": "Opciones de frecuencia de campaña",
+      "queryLines": [
+        "SELECT explode(array('Mensual', 'Quincenal', 'Semanal')) AS frecuencia\n"
       ]
     },
     {
@@ -207,31 +214,36 @@
     },
     {
       "name": "vale_cuesta",
-      "displayName": "Valor y costo de la acción",
+      "displayName": "Valor y costo de la campaña de contacto",
       "queryLines": [
         "WITH x AS (\n",
-        "  SELECT c.*, CAST(:costo_contacto AS DOUBLE) AS costo, CAST(:cupon AS DOUBLE) / 100 AS cup\n",
-        "  FROM workspace.oro.contacto_34_45 c\n",
+        "  SELECT c.*, CAST(:costo_contacto AS DOUBLE) AS costo, CAST(replace(:canje, ',', '.') AS DOUBLE) / 100 AS canje\n",
+        "  FROM workspace.oro.contacto_campanas c\n",
+        "  WHERE frecuencia = :frecuencia\n",
         "),\n",
         "y AS (\n",
         "  SELECT x.*,\n",
-        "    contactos_al_anio * costo\n",
-        "      + (vuelven_solos_antes_de_45 + vuelven_solos_entre_46_y_90) * venta_media_por_visita * cup AS costo_anual\n",
+        "    costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio AS costo_total,\n",
+        "    CEIL((costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio)\n",
+        "         / campanas_al_anio / margen_anual_por_cliente_reactivado) AS por_campana,\n",
+        "    CEIL((costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio)\n",
+        "         / margen_anual_por_cliente_reactivado) AS por_anio\n",
         "  FROM x\n",
         ")\n",
         "SELECT\n",
         "  concat('$', translate(format_number(margen_anual_por_10_puntos / 1000000, 2), ',.', '.,'), ' MM') AS vale_texto,\n",
-        "  concat('$', translate(format_number(costo_anual / 1000000, 2), ',.', '.,'), ' MM') AS cuesta_texto,\n",
-        "  concat(CAST(CEIL(costo_anual / margen_anual_por_cliente_recuperado) AS STRING), ' de ',\n",
-        "         CAST(en_riesgo_no_vuelven_en_90 AS STRING), ' clientes en riesgo (',\n",
-        "         translate(format_number(CEIL(costo_anual / margen_anual_por_cliente_recuperado) / en_riesgo_no_vuelven_en_90 * 100, 1), ',.', '.,'), '%)')\n",
-        "    AS equilibrio_texto,\n",
-        "  concat(CAST(CEIL(costo_anual / margen_anual_por_cliente_recuperado) AS STRING), ' clientes') AS equilibrio_clientes,\n",
-        "  concat('de ', CAST(en_riesgo_no_vuelven_en_90 AS STRING), ' en riesgo (',\n",
-        "         translate(format_number(CEIL(costo_anual / margen_anual_por_cliente_recuperado) / en_riesgo_no_vuelven_en_90 * 100, 1), ',.', '.,'), '%)')\n",
+        "  concat('$', translate(format_number(costo_total / 1000000, 2), ',.', '.,'), ' MM') AS cuesta_texto,\n",
+        "  concat(CAST(por_campana AS STRING), ' de ', translate(format_number(contactos_por_campana, 0), ',.', '.,'), ' contactados') AS equilibrio_texto,\n",
+        "  concat(CAST(por_campana AS STRING), ' clientes') AS equilibrio_clientes,\n",
+        "  concat('de ', translate(format_number(contactos_por_campana, 0), ',.', '.,'), ' contactados en cada campaña ', lower(frecuencia))\n",
         "    AS equilibrio_detalle,\n",
-        "  translate(format_number(contactos_al_anio, 0), ',.', '.,') AS contactos_texto,\n",
-        "  concat('$', translate(format_number(margen_anual_por_cliente_recuperado, 0), ',.', '.,')) AS margen_cliente_texto\n",
+        "  concat('$', translate(format_number(costo_total / campanas_al_anio, 0), ',.', '.,')) AS costo_campana_texto,\n",
+        "  translate(format_number(contactos_por_campana, 0), ',.', '.,') AS contactos_texto,\n",
+        "  concat(CAST(dia_contacto_min AS STRING), ' a ', CAST(dia_contacto_max AS STRING), ' (mediana ',\n",
+        "         CAST(dia_contacto_mediana AS STRING), ')') AS dia_texto,\n",
+        "  concat(translate(format_number(pct_vuelven_solos_90 * 100, 0), ',.', '.,'), ' de cada 100') AS vuelven_texto,\n",
+        "  concat('$', translate(format_number(margen_anual_por_cliente_reactivado, 0), ',.', '.,')) AS margen_cliente_texto,\n",
+        "  concat(CAST(por_anio AS STRING), ' (meta: ', CAST(clientes_meta_10_puntos AS STRING), ')') AS clientes_anio_texto\n",
         "FROM y\n"
       ],
       "parameters": [
@@ -251,15 +263,30 @@
           }
         },
         {
-          "displayName": "cupon",
-          "keyword": "cupon",
+          "displayName": "canje",
+          "keyword": "canje",
           "dataType": "STRING",
           "defaultSelection": {
             "values": {
               "dataType": "STRING",
               "values": [
                 {
-                  "value": "10"
+                  "value": "15"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "frecuencia",
+          "keyword": "frecuencia",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Mensual"
                 }
               ]
             }
@@ -268,11 +295,44 @@
       ]
     },
     {
+      "name": "frecuencias",
+      "displayName": "Costo de la campaña según su frecuencia",
+      "queryLines": [
+        "SELECT frecuencia, orden,\n",
+        "  CAST(campanas_al_anio AS STRING) AS campanas,\n",
+        "  translate(format_number(contactos_al_anio, 0), ',.', '.,') AS contactos,\n",
+        "  concat(CAST(dia_contacto_min AS STRING), ' a ', CAST(dia_contacto_max AS STRING), ' (mediana ',\n",
+        "         CAST(dia_contacto_mediana AS STRING), ')') AS dias,\n",
+        "  concat('$', translate(format_number(costo_preparacion_anual / 1000000, 2), ',.', '.,'), ' MM') AS preparacion,\n",
+        "  concat('$', translate(format_number(costo_mensajes_anual / 1000000, 2), ',.', '.,'), ' MM') AS mensajes,\n",
+        "  concat('$', translate(format_number(costo_cupones_anual / 1000000, 2), ',.', '.,'), ' MM') AS cupones,\n",
+        "  concat('$', translate(format_number(costo_anual / 1000000, 2), ',.', '.,'), ' MM') AS total,\n",
+        "  concat(CAST(clientes_para_pagar_al_anio AS STRING), ' al año (', CAST(clientes_para_pagar_por_campana AS STRING),\n",
+        "         ' por campaña)') AS clientes,\n",
+        "  CASE WHEN se_paga_antes_de_la_meta = 1 THEN 'Sí' ELSE 'No' END AS antes_de_la_meta\n",
+        "FROM workspace.oro.contacto_campanas\n",
+        "ORDER BY orden\n"
+      ]
+    },
+    {
+      "name": "frecuencias_costos",
+      "displayName": "Componentes del costo por frecuencia",
+      "queryLines": [
+        "SELECT frecuencia, orden, 'Preparación (4 h por campaña)' AS componente, round(costo_preparacion_anual / 1000000, 2)\n",
+        "  AS millones FROM workspace.oro.contacto_campanas\n",
+        "UNION ALL SELECT frecuencia, orden, 'Cupones canjeados', round(costo_cupones_anual / 1000000, 2)\n",
+        "  FROM workspace.oro.contacto_campanas\n",
+        "UNION ALL SELECT frecuencia, orden, 'Mensajes', round(costo_mensajes_anual / 1000000, 2)\n",
+        "  FROM workspace.oro.contacto_campanas\n"
+      ]
+    },
+    {
       "name": "estado",
       "displayName": "Estado de la última corrida",
       "queryLines": [
-        "SELECT concat('Fuente: POS, maestro de productos, campañas e IPC (mindicador.cl), 2025 · Dueño del dato: ',\n",
-        "              dueno_dato, ' · Actualizado: ', substr(fecha_hora, 1, 16), ' · Pruebas: ', CAST(pruebas_ok AS STRING),\n",
+        "SELECT concat('Fuente: POS, maestro, campañas e IPC (mindicador.cl), 2025 · Dueño del tablero: ',\n",
+        "              coalesce(dueno_tablero, 'Marketing'), ' · Datos: ', dueno_dato, ' · Actualizado: ',\n",
+        "              substr(fecha_hora, 1, 16), ' · Pruebas: ', CAST(pruebas_ok AS STRING),\n",
         "              ' de ', CAST(pruebas AS STRING), ' · IPC: ', CASE WHEN origen_ipc = 'api' THEN 'API de mindicador.cl' WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'respaldo sin fecha' ELSE concat('respaldo del ', fecha_respaldo_ipc) END) AS pie\n",
         "FROM workspace.control.estado_corrida\n",
         "ORDER BY fecha_hora DESC\n",
@@ -394,7 +454,7 @@
             "multilineTextboxSpec": {
               "lines": [
                 "## ¿La cadena está reteniendo a sus clientes o los está reponiendo?\n",
-                "Multitienda del Sur · clientes identificados del programa · cortes al 30-jun y al 31-dic de 2025. **Para** Gerencia Comercial y Marketing, **cada mes** al cierre: decidir a quién contactar y qué local revisar.\n"
+                "Multitienda del Sur · clientes identificados del programa · cortes al 30-jun y al 31-dic de 2025. **Para** Marketing (dueño del tablero), Gerencia Comercial y Finanzas, **cada mes** al cierre: decidir a quién contactar y qué local revisar.\n"
               ]
             }
           },
@@ -1094,7 +1154,7 @@
             "multilineTextboxSpec": {
               "lines": [
                 "### Contactar a quien cumple 34 días sin comprar: cuánto vale y cuánto cuesta\n",
-                "Margen bruto en pesos de diciembre de 2025. El costo por contacto y el cupón son supuestos ajustables: el caso no informa costos de contacto.\n"
+                "Margen bruto en pesos de diciembre de 2025. Costos informados por Marketing (17-nov): mensaje de $80 a $120, 4 horas de preparación por campaña a $15.000 la hora y cupón de 10% (tope $5.000) que solo cuesta si se canjea.\n"
               ]
             }
           },
@@ -1129,7 +1189,7 @@
               "encodings": {
                 "value": {
                   "fieldName": "vale_texto",
-                  "displayName": "Vale: margen anual por cada 10 puntos de retención",
+                  "displayName": "Vale: margen anual de 10 puntos más de retención (49 clientes)",
                   "style": {
                     "fontSize": 40
                   }
@@ -1137,7 +1197,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Vale: margen anual por cada 10 puntos de retención"
+                "title": "Vale: margen anual de 10 puntos más de retención (49 clientes)"
               }
             }
           },
@@ -1172,7 +1232,7 @@
               "encodings": {
                 "value": {
                   "fieldName": "cuesta_texto",
-                  "displayName": "Cuesta: contactos y cupones en un año",
+                  "displayName": "Cuesta: la campaña durante un año",
                   "style": {
                     "fontSize": 40
                   }
@@ -1180,7 +1240,7 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Cuesta: contactos y cupones en un año"
+                "title": "Cuesta: la campaña durante un año"
               }
             }
           },
@@ -1215,15 +1275,15 @@
               "encodings": {
                 "value": {
                   "fieldName": "equilibrio_texto",
-                  "displayName": "Se paga si recupera",
+                  "displayName": "Cada campaña se paga si reactiva",
                   "style": {
-                    "fontSize": 24
+                    "fontSize": 28
                   }
                 }
               },
               "frame": {
                 "showTitle": true,
-                "title": "Se paga si recupera"
+                "title": "Cada campaña se paga si reactiva"
               }
             }
           },
@@ -1232,6 +1292,78 @@
             "y": 13,
             "width": 2,
             "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filtro_frecuencia",
+            "queries": [
+              {
+                "name": "filtro_frecuencia_opciones",
+                "query": {
+                  "datasetName": "opciones_frecuencia",
+                  "fields": [
+                    {
+                      "name": "frecuencia",
+                      "expression": "`frecuencia`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_frecuencia_vale_cuesta",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "parameters": [
+                    {
+                      "name": "frecuencia",
+                      "keyword": "frecuencia"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "frecuencia",
+                    "displayName": "Frecuencia de la campaña",
+                    "queryName": "filtro_frecuencia_opciones"
+                  },
+                  {
+                    "parameterName": "frecuencia",
+                    "queryName": "filtro_frecuencia_vale_cuesta"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "Mensual"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Frecuencia de la campaña"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 2,
+            "height": 1
           }
         },
         {
@@ -1272,7 +1404,7 @@
                 "fields": [
                   {
                     "fieldName": "costo_contacto",
-                    "displayName": "Costo por contacto ($)",
+                    "displayName": "Costo por mensaje ($)",
                     "queryName": "filtro_costo_opciones"
                   },
                   {
@@ -1295,12 +1427,12 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Costo por contacto ($)"
+                "title": "Costo por mensaje ($)"
               }
             }
           },
           "position": {
-            "x": 0,
+            "x": 2,
             "y": 15,
             "width": 2,
             "height": 1
@@ -1308,29 +1440,29 @@
         },
         {
           "widget": {
-            "name": "filtro_cupon",
+            "name": "filtro_canje",
             "queries": [
               {
-                "name": "filtro_cupon_opciones",
+                "name": "filtro_canje_opciones",
                 "query": {
-                  "datasetName": "opciones_cupon",
+                  "datasetName": "opciones_canje",
                   "fields": [
                     {
-                      "name": "cupon",
-                      "expression": "`cupon`"
+                      "name": "canje",
+                      "expression": "`canje`"
                     }
                   ],
                   "disaggregated": false
                 }
               },
               {
-                "name": "filtro_cupon_vale_cuesta",
+                "name": "filtro_canje_vale_cuesta",
                 "query": {
                   "datasetName": "vale_cuesta",
                   "parameters": [
                     {
-                      "name": "cupon",
-                      "keyword": "cupon"
+                      "name": "canje",
+                      "keyword": "canje"
                     }
                   ],
                   "disaggregated": false
@@ -1343,13 +1475,13 @@
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "cupon",
-                    "displayName": "Cupón para quien vuelve (%)",
-                    "queryName": "filtro_cupon_opciones"
+                    "fieldName": "canje",
+                    "displayName": "Clientes contactados que canjean el cupón (%)",
+                    "queryName": "filtro_canje_opciones"
                   },
                   {
-                    "parameterName": "cupon",
-                    "queryName": "filtro_cupon_vale_cuesta"
+                    "parameterName": "canje",
+                    "queryName": "filtro_canje_vale_cuesta"
                   }
                 ]
               },
@@ -1359,7 +1491,7 @@
                     "dataType": "STRING",
                     "values": [
                       {
-                        "value": "10"
+                        "value": "15"
                       }
                     ]
                   }
@@ -1367,14 +1499,57 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Cupón para quien vuelve (%)"
+                "title": "Clientes contactados que canjean el cupón (%)"
               }
             }
           },
           "position": {
-            "x": 2,
+            "x": 4,
             "y": 15,
             "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "costo_campana",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "costo_campana_texto",
+                      "expression": "`costo_campana_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "costo_campana_texto",
+                  "displayName": "Costo por campaña",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Costo por campaña"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 1,
             "height": 1
           }
         },
@@ -1402,7 +1577,7 @@
               "encodings": {
                 "value": {
                   "fieldName": "contactos_texto",
-                  "displayName": "Contactos al año",
+                  "displayName": "Contactos por campaña",
                   "style": {
                     "fontSize": 16
                   }
@@ -1410,13 +1585,99 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Contactos al año"
+                "title": "Contactos por campaña"
               }
             }
           },
           "position": {
-            "x": 4,
-            "y": 15,
+            "x": 1,
+            "y": 16,
+            "width": 1,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "dia_contacto",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "dia_texto",
+                      "expression": "`dia_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "dia_texto",
+                  "displayName": "Días sin comprar al contacto",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Días sin comprar al contacto"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 16,
+            "width": 1,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "vuelven_solos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "vuelven_texto",
+                      "expression": "`vuelven_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "vuelven_texto",
+                  "displayName": "Vuelven solos en 90 días",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Vuelven solos en 90 días"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 16,
             "width": 1,
             "height": 1
           }
@@ -1445,7 +1706,7 @@
               "encodings": {
                 "value": {
                   "fieldName": "margen_cliente_texto",
-                  "displayName": "Margen por cliente recuperado",
+                  "displayName": "Margen anual por cliente reactivado",
                   "style": {
                     "fontSize": 16
                   }
@@ -1453,13 +1714,56 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Margen por cliente recuperado"
+                "title": "Margen anual por cliente reactivado"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 16,
+            "width": 1,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "clientes_anio",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "clientes_anio_texto",
+                      "expression": "`clientes_anio_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "clientes_anio_texto",
+                  "displayName": "Clientes que pagan el año",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clientes que pagan el año"
               }
             }
           },
           "position": {
             "x": 5,
-            "y": 15,
+            "y": 16,
             "width": 1,
             "height": 1
           }
@@ -1718,7 +2022,7 @@
           },
           "position": {
             "x": 0,
-            "y": 16,
+            "y": 17,
             "width": 6,
             "height": 7
           }
@@ -1761,7 +2065,7 @@
           },
           "position": {
             "x": 0,
-            "y": 23,
+            "y": 24,
             "width": 6,
             "height": 1
           }
@@ -1770,7 +2074,7 @@
     },
     {
       "name": "definicion",
-      "displayName": "Decisión de definición",
+      "displayName": "Decisiones",
       "pageType": "PAGE_TYPE_CANVAS",
       "layout": [
         {
@@ -2178,6 +2482,485 @@
             "y": 11,
             "width": 2,
             "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "titulo_frecuencia",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Decisión de frecuencia de la campaña de contacto\n",
+                "Preparar una campaña cuesta lo mismo sin importar a cuántos clientes llegue, así que la frecuencia decide el costo. Costos con $100 por mensaje y canje de 15%.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "grafico_frecuencias",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "frecuencias_costos",
+                  "fields": [
+                    {
+                      "name": "frecuencia",
+                      "expression": "`frecuencia`"
+                    },
+                    {
+                      "name": "componente",
+                      "expression": "`componente`"
+                    },
+                    {
+                      "name": "sum(millones)",
+                      "expression": "SUM(`millones`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "frecuencia",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "frecuencia"
+                },
+                "y": {
+                  "fieldName": "sum(millones)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "$ MM",
+                  "axis": {
+                    "title": "$ MM"
+                  }
+                },
+                "color": {
+                  "fieldName": "componente",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Preparación (4 h por campaña)",
+                        "color": "#E8612C"
+                      },
+                      {
+                        "value": "Cupones canjeados",
+                        "color": "#8C8A84"
+                      },
+                      {
+                        "value": "Mensajes",
+                        "color": "#D9D6CF"
+                      }
+                    ]
+                  },
+                  "displayName": "Componente"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Costo anual de la campaña según su frecuencia ($ MM, pesos de diciembre de 2025)",
+                "showDescription": true,
+                "description": "En naranjo, la preparación: 4 horas de un analista por campaña, a $15.000 la hora."
+              },
+              "mark": {
+                "layout": "stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "por_que_mensual",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Por qué mensual\n",
+                "Solo la campaña mensual se paga antes de llegar a la meta: necesita 31 clientes reactivados al año (3 por campaña) y la meta son 49. La semanal necesita 91 y la quincenal 53. Además, es el ritmo con que Marketing ya trabaja.\n",
+                "\n",
+                "**Lo que se cede:** el contacto llega entre los días 34 y 63 sin comprar (mediana 45). Si la cadena entrega la lista de clientes y la preparación baja, una frecuencia mayor acerca el contacto al día 34.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 17,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tabla_frecuencias",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "frecuencias",
+                  "fields": [
+                    {
+                      "name": "frecuencia",
+                      "expression": "`frecuencia`"
+                    },
+                    {
+                      "name": "campanas",
+                      "expression": "`campanas`"
+                    },
+                    {
+                      "name": "contactos",
+                      "expression": "`contactos`"
+                    },
+                    {
+                      "name": "dias",
+                      "expression": "`dias`"
+                    },
+                    {
+                      "name": "preparacion",
+                      "expression": "`preparacion`"
+                    },
+                    {
+                      "name": "mensajes",
+                      "expression": "`mensajes`"
+                    },
+                    {
+                      "name": "cupones",
+                      "expression": "`cupones`"
+                    },
+                    {
+                      "name": "total",
+                      "expression": "`total`"
+                    },
+                    {
+                      "name": "clientes",
+                      "expression": "`clientes`"
+                    },
+                    {
+                      "name": "antes_de_la_meta",
+                      "expression": "`antes_de_la_meta`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "frecuencia",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Frecuencia",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Frecuencia"
+                  },
+                  {
+                    "fieldName": "campanas",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Campañas al año",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Campañas al año"
+                  },
+                  {
+                    "fieldName": "contactos",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Contactos al año",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Contactos al año"
+                  },
+                  {
+                    "fieldName": "dias",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "Días sin comprar al contacto",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Días sin comprar al contacto"
+                  },
+                  {
+                    "fieldName": "preparacion",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "Preparación",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Preparación"
+                  },
+                  {
+                    "fieldName": "mensajes",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 5,
+                    "title": "Mensajes",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Mensajes"
+                  },
+                  {
+                    "fieldName": "cupones",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 6,
+                    "title": "Cupones",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Cupones"
+                  },
+                  {
+                    "fieldName": "total",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 7,
+                    "title": "Costo anual",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Costo anual"
+                  },
+                  {
+                    "fieldName": "clientes",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 8,
+                    "title": "Clientes que lo pagan",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Clientes que lo pagan"
+                  },
+                  {
+                    "fieldName": "antes_de_la_meta",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 9,
+                    "title": "¿Antes de la meta (49)?",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "¿Antes de la meta (49)?"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Detalle por frecuencia"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 23,
+            "width": 6,
+            "height": 3
           }
         }
       ]

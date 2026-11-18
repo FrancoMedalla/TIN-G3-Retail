@@ -29,7 +29,7 @@ def param(keyword, defecto):
 
 
 P_VENTANA, P_TIPO = param("ventana", "90"), param("tipo", "Todos")
-P_COSTO, P_CUPON = param("costo_contacto", "100"), param("cupon", "10")
+P_COSTO, P_CANJE, P_FRECUENCIA = param("costo_contacto", "100"), param("canje", "15"), param("frecuencia", "Mensual")
 
 ORIGEN_IPC = ("CASE WHEN origen_ipc = 'api' THEN 'API de mindicador.cl' "
               "WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'respaldo sin fecha' "
@@ -41,9 +41,11 @@ DATASETS = {
     "opciones_ventana": ("Opciones de ventana", "SELECT explode(array('30', '90', '180')) AS ventana", []),
     "opciones_tipo": ("Opciones de tipo de cliente",
                       "SELECT explode(array('Todos', 'Base heredada', 'Nuevo 2025')) AS tipo_cliente", []),
-    "opciones_costo": ("Opciones de costo por contacto",
-                       "SELECT explode(array('50', '100', '150', '200', '300', '500')) AS costo_contacto", []),
-    "opciones_cupon": ("Opciones de cupón", "SELECT explode(array('0', '5', '10', '15', '20')) AS cupon", []),
+    "opciones_costo": ("Opciones de costo por mensaje",
+                       "SELECT explode(array('80', '100', '120')) AS costo_contacto", []),
+    "opciones_canje": ("Opciones de tasa de canje", "SELECT explode(array('10', '12,5', '15')) AS canje", []),
+    "opciones_frecuencia": ("Opciones de frecuencia de campaña",
+                            "SELECT explode(array('Mensual', 'Quincenal', 'Semanal')) AS frecuencia", []),
     "kpi": ("Cifras clave", f"""
 WITH m AS (
   SELECT {', '.join(f'MEASURE({x}) AS {x}' for x in MEDIDAS)}
@@ -113,35 +115,65 @@ SELECT w.tienda, w.activos_jun, w.retenidos, round(w.tasa, 3) AS tasa,
 FROM w CROSS JOIN c
 ORDER BY w.tienda
 """, [P_VENTANA, P_TIPO]),
-    "vale_cuesta": ("Valor y costo de la acción", f"""
+    "vale_cuesta": ("Valor y costo de la campaña de contacto", f"""
 WITH x AS (
-  SELECT c.*, CAST(:costo_contacto AS DOUBLE) AS costo, CAST(:cupon AS DOUBLE) / 100 AS cup
-  FROM {CAT}.oro.contacto_34_45 c
+  SELECT c.*, CAST(:costo_contacto AS DOUBLE) AS costo, CAST(replace(:canje, ',', '.') AS DOUBLE) / 100 AS canje
+  FROM {CAT}.oro.contacto_campanas c
+  WHERE frecuencia = :frecuencia
 ),
 y AS (
   SELECT x.*,
-    contactos_al_anio * costo
-      + (vuelven_solos_antes_de_45 + vuelven_solos_entre_46_y_90) * venta_media_por_visita * cup AS costo_anual
+    costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio AS costo_total,
+    CEIL((costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio)
+         / campanas_al_anio / margen_anual_por_cliente_reactivado) AS por_campana,
+    CEIL((costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio)
+         / margen_anual_por_cliente_reactivado) AS por_anio
   FROM x
 )
 SELECT
   concat('$', {num('margen_anual_por_10_puntos / 1000000', 2)}, ' MM') AS vale_texto,
-  concat('$', {num('costo_anual / 1000000', 2)}, ' MM') AS cuesta_texto,
-  concat(CAST(CEIL(costo_anual / margen_anual_por_cliente_recuperado) AS STRING), ' de ',
-         CAST(en_riesgo_no_vuelven_en_90 AS STRING), ' clientes en riesgo (',
-         {num('CEIL(costo_anual / margen_anual_por_cliente_recuperado) / en_riesgo_no_vuelven_en_90 * 100')}, '%)')
-    AS equilibrio_texto,
-  concat(CAST(CEIL(costo_anual / margen_anual_por_cliente_recuperado) AS STRING), ' clientes') AS equilibrio_clientes,
-  concat('de ', CAST(en_riesgo_no_vuelven_en_90 AS STRING), ' en riesgo (',
-         {num('CEIL(costo_anual / margen_anual_por_cliente_recuperado) / en_riesgo_no_vuelven_en_90 * 100')}, '%)')
+  concat('$', {num('costo_total / 1000000', 2)}, ' MM') AS cuesta_texto,
+  concat(CAST(por_campana AS STRING), ' de ', {num('contactos_por_campana', 0)}, ' contactados') AS equilibrio_texto,
+  concat(CAST(por_campana AS STRING), ' clientes') AS equilibrio_clientes,
+  concat('de ', {num('contactos_por_campana', 0)}, ' contactados en cada campaña ', lower(frecuencia))
     AS equilibrio_detalle,
-  {num('contactos_al_anio', 0)} AS contactos_texto,
-  concat('$', {num('margen_anual_por_cliente_recuperado', 0)}) AS margen_cliente_texto
+  concat('$', {num('costo_total / campanas_al_anio', 0)}) AS costo_campana_texto,
+  {num('contactos_por_campana', 0)} AS contactos_texto,
+  concat(CAST(dia_contacto_min AS STRING), ' a ', CAST(dia_contacto_max AS STRING), ' (mediana ',
+         CAST(dia_contacto_mediana AS STRING), ')') AS dia_texto,
+  concat({num('pct_vuelven_solos_90 * 100', 0)}, ' de cada 100') AS vuelven_texto,
+  concat('$', {num('margen_anual_por_cliente_reactivado', 0)}) AS margen_cliente_texto,
+  concat(CAST(por_anio AS STRING), ' (meta: ', CAST(clientes_meta_10_puntos AS STRING), ')') AS clientes_anio_texto
 FROM y
-""", [P_COSTO, P_CUPON]),
+""", [P_COSTO, P_CANJE, P_FRECUENCIA]),
+    "frecuencias": ("Costo de la campaña según su frecuencia", f"""
+SELECT frecuencia, orden,
+  CAST(campanas_al_anio AS STRING) AS campanas,
+  {num('contactos_al_anio', 0)} AS contactos,
+  concat(CAST(dia_contacto_min AS STRING), ' a ', CAST(dia_contacto_max AS STRING), ' (mediana ',
+         CAST(dia_contacto_mediana AS STRING), ')') AS dias,
+  concat('$', {num('costo_preparacion_anual / 1000000', 2)}, ' MM') AS preparacion,
+  concat('$', {num('costo_mensajes_anual / 1000000', 2)}, ' MM') AS mensajes,
+  concat('$', {num('costo_cupones_anual / 1000000', 2)}, ' MM') AS cupones,
+  concat('$', {num('costo_anual / 1000000', 2)}, ' MM') AS total,
+  concat(CAST(clientes_para_pagar_al_anio AS STRING), ' al año (', CAST(clientes_para_pagar_por_campana AS STRING),
+         ' por campaña)') AS clientes,
+  CASE WHEN se_paga_antes_de_la_meta = 1 THEN 'Sí' ELSE 'No' END AS antes_de_la_meta
+FROM {CAT}.oro.contacto_campanas
+ORDER BY orden
+""", []),
+    "frecuencias_costos": ("Componentes del costo por frecuencia", f"""
+SELECT frecuencia, orden, 'Preparación (4 h por campaña)' AS componente, round(costo_preparacion_anual / 1000000, 2)
+  AS millones FROM {CAT}.oro.contacto_campanas
+UNION ALL SELECT frecuencia, orden, 'Cupones canjeados', round(costo_cupones_anual / 1000000, 2)
+  FROM {CAT}.oro.contacto_campanas
+UNION ALL SELECT frecuencia, orden, 'Mensajes', round(costo_mensajes_anual / 1000000, 2)
+  FROM {CAT}.oro.contacto_campanas
+""", []),
     "estado": ("Estado de la última corrida", f"""
-SELECT concat('Fuente: POS, maestro de productos, campañas e IPC (mindicador.cl), 2025 · Dueño del dato: ',
-              dueno_dato, ' · Actualizado: ', substr(fecha_hora, 1, 16), ' · Pruebas: ', CAST(pruebas_ok AS STRING),
+SELECT concat('Fuente: POS, maestro, campañas e IPC (mindicador.cl), 2025 · Dueño del tablero: ',
+              coalesce(dueno_tablero, 'Marketing'), ' · Datos: ', dueno_dato, ' · Actualizado: ',
+              substr(fecha_hora, 1, 16), ' · Pruebas: ', CAST(pruebas_ok AS STRING),
               ' de ', CAST(pruebas AS STRING), ' · IPC: ', {ORIGEN_IPC}) AS pie
 FROM {CAT}.control.estado_corrida
 ORDER BY fecha_hora DESC
@@ -334,8 +366,8 @@ PARAM_PRINCIPAL = ["kpi", "cascada", "tiendas"]
 pagina_principal = [
     texto("titulo", ["## ¿La cadena está reteniendo a sus clientes o los está reponiendo?",
                      "Multitienda del Sur · clientes identificados del programa · cortes al 30-jun y al 31-dic de 2025. "
-                     "**Para** Gerencia Comercial y Marketing, **cada mes** al cierre: decidir a quién contactar y qué "
-                     "local revisar."], pos(0, 0, 6, 2)),
+                     "**Para** Marketing (dueño del tablero), Gerencia Comercial y Finanzas, **cada mes** al cierre: "
+                     "decidir a quién contactar y qué local revisar."], pos(0, 0, 6, 2)),
     filtro("filtro_ventana", "Ventana de cliente activo (días)", "opciones_ventana", "ventana", "ventana",
            PARAM_PRINCIPAL, "90", pos(0, 2, 2, 1)),
     filtro("filtro_tipo", "Tipo de cliente", "opciones_tipo", "tipo_cliente", "tipo", PARAM_PRINCIPAL, "Todos",
@@ -365,27 +397,36 @@ pagina_principal = [
            descripcion="En naranjo, el local cuyo intervalo de confianza al 95% queda completo bajo la tasa de la "
                        "cadena. Orden alfabético: sin ranking."),
     texto("titulo_accion", ["### Contactar a quien cumple 34 días sin comprar: cuánto vale y cuánto cuesta",
-                            "Margen bruto en pesos de diciembre de 2025. El costo por contacto y el cupón son supuestos "
-                            "ajustables: el caso no informa costos de contacto."], pos(0, 12, 6, 1)),
-    contador("vale", "vale_cuesta", "vale_texto", "Vale: margen anual por cada 10 puntos de retención",
+                            "Margen bruto en pesos de diciembre de 2025. Costos informados por Marketing (17-nov): "
+                            "mensaje de $80 a $120, 4 horas de preparación por campaña a $15.000 la hora y cupón de "
+                            "10% (tope $5.000) que solo cuesta si se canjea."], pos(0, 12, 6, 1)),
+    contador("vale", "vale_cuesta", "vale_texto", "Vale: margen anual de 10 puntos más de retención (49 clientes)",
              pos(0, 13, 2, 2), tam=40),
-    contador("cuesta", "vale_cuesta", "cuesta_texto", "Cuesta: contactos y cupones en un año", pos(2, 13, 2, 2),
+    contador("cuesta", "vale_cuesta", "cuesta_texto", "Cuesta: la campaña durante un año", pos(2, 13, 2, 2),
              tam=40),
-    contador("equilibrio", "vale_cuesta", "equilibrio_texto", "Se paga si recupera", pos(4, 13, 2, 2), tam=24),
-    filtro("filtro_costo", "Costo por contacto ($)", "opciones_costo", "costo_contacto", "costo_contacto",
-           ["vale_cuesta"], "100", pos(0, 15, 2, 1)),
-    filtro("filtro_cupon", "Cupón para quien vuelve (%)", "opciones_cupon", "cupon", "cupon", ["vale_cuesta"], "10",
-           pos(2, 15, 2, 1)),
-    contador("contactos", "vale_cuesta", "contactos_texto", "Contactos al año", pos(4, 15, 1, 1), tam=16),
-    contador("margen_cliente", "vale_cuesta", "margen_cliente_texto", "Margen por cliente recuperado",
-             pos(5, 15, 1, 1), tam=16),
+    contador("equilibrio", "vale_cuesta", "equilibrio_texto", "Cada campaña se paga si reactiva", pos(4, 13, 2, 2),
+             tam=28),
+    filtro("filtro_frecuencia", "Frecuencia de la campaña", "opciones_frecuencia", "frecuencia", "frecuencia",
+           ["vale_cuesta"], "Mensual", pos(0, 15, 2, 1)),
+    filtro("filtro_costo", "Costo por mensaje ($)", "opciones_costo", "costo_contacto", "costo_contacto",
+           ["vale_cuesta"], "100", pos(2, 15, 2, 1)),
+    filtro("filtro_canje", "Clientes contactados que canjean el cupón (%)", "opciones_canje", "canje", "canje",
+           ["vale_cuesta"], "15", pos(4, 15, 2, 1)),
+    contador("costo_campana", "vale_cuesta", "costo_campana_texto", "Costo por campaña", pos(0, 16, 1, 1), tam=16),
+    contador("contactos", "vale_cuesta", "contactos_texto", "Contactos por campaña", pos(1, 16, 1, 1), tam=16),
+    contador("dia_contacto", "vale_cuesta", "dia_texto", "Días sin comprar al contacto", pos(2, 16, 1, 1), tam=16),
+    contador("vuelven_solos", "vale_cuesta", "vuelven_texto", "Vuelven solos en 90 días", pos(3, 16, 1, 1), tam=16),
+    contador("margen_cliente", "vale_cuesta", "margen_cliente_texto", "Margen anual por cliente reactivado",
+             pos(4, 16, 1, 1), tam=16),
+    contador("clientes_anio", "vale_cuesta", "clientes_anio_texto", "Clientes que pagan el año", pos(5, 16, 1, 1),
+             tam=16),
     tabla("tabla_locales", "tiendas",
           [("tienda", "Local principal", "texto"), ("activos_jun", "Activos al 30-jun", "entero"),
            ("retenidos", "Siguen activos al 31-dic", "entero"), ("tasa_texto", "Tasa de retención", "texto"),
            ("intervalo_95", "Intervalo de confianza 95%", "texto"), ("tasa_cadena_texto", "Cadena", "texto"),
            ("lectura", "Lectura", "texto")],
-          "Detalle por local", pos(0, 16, 6, 7)),
-    contador("pie", "estado", "pie", "Fuente y estado de los datos", pos(0, 23, 6, 1), tam=12),
+          "Detalle por local", pos(0, 17, 6, 7)),
+    contador("pie", "estado", "pie", "Fuente y estado de los datos", pos(0, 24, 6, 1), tam=12),
 ]
 
 pagina_definicion = [
@@ -418,6 +459,30 @@ pagina_definicion = [
                               "heredada no cambia. Sin ellos, la brecha entre nuevos y heredada se reduce de 8,9 a "
                               "3,7 puntos: no es concluyente. La conclusión (repone) no depende de esta definición."],
           pos(4, 11, 2, 5)),
+    texto("titulo_frecuencia", ["## Decisión de frecuencia de la campaña de contacto",
+                                "Preparar una campaña cuesta lo mismo sin importar a cuántos clientes llegue, así que "
+                                "la frecuencia decide el costo. Costos con $100 por mensaje y canje de 15%."],
+          pos(0, 16, 6, 1)),
+    barras("grafico_frecuencias", "frecuencias_costos", "frecuencia", "millones", "componente",
+           "Costo anual de la campaña según su frecuencia ($ MM, pesos de diciembre de 2025)", pos(0, 17, 4, 6),
+           mapeo={"Preparación (4 h por campaña)": NARANJO, "Cupones canjeados": GRIS, "Mensajes": GRIS_CLARO},
+           titulo_valor="$ MM", leyenda="Componente",
+           descripcion="En naranjo, la preparación: 4 horas de un analista por campaña, a $15.000 la hora."),
+    texto("por_que_mensual", ["### Por qué mensual",
+                              "Solo la campaña mensual se paga antes de llegar a la meta: necesita 31 clientes "
+                              "reactivados al año (3 por campaña) y la meta son 49. La semanal necesita 91 y la "
+                              "quincenal 53. Además, es el ritmo con que Marketing ya trabaja.",
+                              "",
+                              "**Lo que se cede:** el contacto llega entre los días 34 y 63 sin comprar (mediana 45). "
+                              "Si la cadena entrega la lista de clientes y la preparación baja, una frecuencia mayor "
+                              "acerca el contacto al día 34."], pos(4, 17, 2, 6)),
+    tabla("tabla_frecuencias", "frecuencias",
+          [("frecuencia", "Frecuencia", "texto"), ("campanas", "Campañas al año", "texto"),
+           ("contactos", "Contactos al año", "texto"), ("dias", "Días sin comprar al contacto", "texto"),
+           ("preparacion", "Preparación", "texto"), ("mensajes", "Mensajes", "texto"),
+           ("cupones", "Cupones", "texto"), ("total", "Costo anual", "texto"),
+           ("clientes", "Clientes que lo pagan", "texto"), ("antes_de_la_meta", "¿Antes de la meta (49)?", "texto")],
+          "Detalle por frecuencia", pos(0, 23, 6, 3)),
 ]
 
 pagina_calidad = [
@@ -451,7 +516,7 @@ tablero = {
     "pages": [
         {"name": "principal", "displayName": "Retención y reposición", "pageType": "PAGE_TYPE_CANVAS",
          "layout": pagina_principal},
-        {"name": "definicion", "displayName": "Decisión de definición", "pageType": "PAGE_TYPE_CANVAS",
+        {"name": "definicion", "displayName": "Decisiones", "pageType": "PAGE_TYPE_CANVAS",
          "layout": pagina_definicion},
         {"name": "calidad", "displayName": "Calidad de datos", "pageType": "PAGE_TYPE_CANVAS",
          "layout": pagina_calidad},

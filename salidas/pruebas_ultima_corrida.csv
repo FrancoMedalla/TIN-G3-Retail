@@ -1,66 +1,71 @@
 ﻿id_corrida,fecha_hora,capa,id_prueba,fuente_o_metrica,que_verifica,severidad,resultado,filas_que_fallan,accion_si_falla
-20261116-032636-local,2026-11-16 03:27:02,plata,P-BOL-01,POS (SQLite),boleta_id único después de quitar duplicados exactos,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:02,plata,P-BOL-02,POS (SQLite),Ninguna fecha dd/mm/aaaa contradice la lectura día/mes,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:02,plata,P-BOL-03,POS (SQLite),Toda fecha de boleta se pudo interpretar,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:02,plata,P-BOL-04,POS (SQLite),Todo cliente_id de las boletas existe en clientes,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:02,plata,P-BOL-05,POS (SQLite),Toda tienda de las boletas existe en tiendas,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:03,plata,P-DET-01,POS (SQLite),Ninguna línea con número repetido es copia exacta,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:03,plata,P-DET-02,POS (SQLite),Todo precio y monto de línea es numérico,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:03,plata,P-DET-03,POS (SQLite),"Descuento de línea en {0; 0,10; 0,25}",bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:03,plata,P-DET-04,Campañas (JSON),Ninguna línea cae en dos campañas,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:03,plata,P-BOL-06,POS (SQLite),Toda boleta válida tiene al menos una línea,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:03,plata,P-BOL-07,POS (SQLite),Todas las boletas válidas son de 2025,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:03,plata,P-COB-01,Cobertura,Al menos 80% de las boletas de origen entra a la retención,avisa,pasó,953,Seguir; revisar qué regla excluye más registros que en la corrida anterior
-20261116-032636-local,2026-11-16 03:27:09,oro,O-FEC-01,IPC (API),Todo día de 2025 tiene IPC,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-TIE-01,POS (SQLite),Cada tienda vende por un solo canal y solo el formato Online es Web,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HEC-01,Modelo,Toda línea tiene su boleta,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HEC-02,Métrica,"Clave del hecho (boleta_id, linea_id) única",bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HEC-03,Métrica,Mismas filas en el hecho que en plata.detalle,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-DIM-dim_fecha,Métrica,Llave única en dim_fecha,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HUE-dim_fecha,Métrica,Sin claves huérfanas hacia dim_fecha,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-DIM-dim_cliente,Métrica,Llave única en dim_cliente,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HUE-dim_cliente,Métrica,Sin claves huérfanas hacia dim_cliente,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-DIM-dim_tienda,Métrica,Llave única en dim_tienda,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HUE-dim_tienda,Métrica,Sin claves huérfanas hacia dim_tienda,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-DIM-dim_producto,Métrica,Llave única en dim_producto,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HUE-dim_producto,Métrica,Sin claves huérfanas hacia dim_producto,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-DIM-dim_campana,Métrica,Llave única en dim_campana,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HUE-dim_campana,Métrica,Sin claves huérfanas hacia dim_campana,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HEC-04,Métrica,El monto del hecho cuadra al peso con plata.boletas,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HEC-05,Métrica,Todas las fechas del hecho están dentro de 2025,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HEC-06,Métrica,Ninguna línea con cantidad 0,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HEC-07,Métrica,"Cada boleta tiene una sola fecha, tienda y cliente",bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HEC-08,Métrica,Visitas identificadas del modelo = cobertura de plata,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:09,oro,O-HEC-09,Margen,El costo cubre al menos 95% de la venta,avisa,pasó,284,Seguir; el margen se informa con su cobertura
-20261116-032636-local,2026-11-16 03:27:09,oro,O-DIC-01,Diccionario,Todo campo del modelo está en el diccionario y viceversa,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:01,plata,P-PROD-01,Maestro (CSV),Toda categoría tiene un nombre canónico,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:01,plata,P-PROD-02,Maestro (CSV),Cada subcategoría pertenece a una sola categoría,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:01,plata,P-PROD-03,Maestro (CSV),Un registro por SKU,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:01,plata,P-PROD-04,Maestro (CSV),Al menos 95% de los SKU tiene costo unitario (para el margen),avisa,pasó,1,Seguir; el margen se calcula solo donde hay costo y se declara su cobertura
-20261116-032636-local,2026-11-16 03:27:01,plata,P-CAMP-01,Campañas (JSON),Descuento entre 0 y 1 y fecha de fin posterior al inicio,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:01,plata,P-IPC-01,IPC (API),12 meses distintos de 2025,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:01,plata,P-IPC-02,IPC (API),Variación mensual entre -2% y +3%,avisa,pasó,0,Seguir; revisar si la API cambió de unidad
-20261116-032636-local,2026-11-16 03:27:01,plata,P-GEO-01,POS (SQLite),Ninguna comuna apunta a una región inexistente,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:02,plata,P-GEO-02,POS (SQLite),Toda tienda tiene macrozona,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:02,plata,P-CLI-01,POS (SQLite),Toda fecha de alta se pudo interpretar,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:02,plata,P-CLI-02,POS (SQLite),Un cliente por RUT,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:45,bronce,B-POS-tiendas,POS (SQLite),pos_tiendas: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:47,bronce,B-CSV-01,Maestro (CSV),Mismas filas en bronce que en una lectura independiente,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:47,bronce,B-CSV-02,Maestro (CSV),"Trae las columnas sku, costo_unitario y precio_lista",bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:49,bronce,B-JSON-01,Campañas (JSON),Mismas campañas y SKU que el archivo,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:49,bronce,B-JSON-02,Campañas (JSON),Toda campaña tiene fecha de inicio y de fin,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:56,bronce,B-API-01,IPC (API),La serie trae los 12 meses de 2025,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:56,bronce,B-API-02,IPC (API),El IPC viene de la API y no del respaldo,avisa,falló,0,Se usa el respaldo del Volume; el pie del tablero indica 'IPC desde respaldo'
-20261116-032636-local,2026-11-16 03:26:40,bronce,B-POS-01,POS (SQLite),Están las 7 tablas esperadas del POS,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:44,bronce,B-POS-boleta_detalle,POS (SQLite),pos_boleta_detalle: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:44,bronce,B-POS-boletas,POS (SQLite),pos_boletas: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:44,bronce,B-POS-clientes,POS (SQLite),pos_clientes: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:44,bronce,B-POS-comunas,POS (SQLite),pos_comunas: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:45,bronce,B-POS-medios_pago,POS (SQLite),pos_medios_pago: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:26:45,bronce,B-POS-regiones,POS (SQLite),pos_regiones: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:16,semantica,S-MET-03,Métrica,Cada cliente aparece una vez por ventana,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:16,semantica,S-MET-04,Métrica,El corte por local suma el total de activos al 30-jun,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:16,semantica,S-MET-05,Métrica,"La cadena reproduce las cifras publicadas en el informe (±0,1 punto)",avisa,pasó,0,Seguir; el informe debe explicar el cambio en el registro de mejora
-20261116-032636-local,2026-11-16 03:27:13,semantica,S-VIS-01,Métrica,Visitas identificadas = cobertura,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:16,semantica,S-MET-01,Métrica,Tasas entre 0 y 1,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
-20261116-032636-local,2026-11-16 03:27:16,semantica,S-MET-02,Métrica,La cascada cierra: jun = retenidos + perdidos; dic = retenidos + ganados,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:59,plata,P-BOL-01,POS (SQLite),boleta_id único después de quitar duplicados exactos,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:59,plata,P-BOL-02,POS (SQLite),Ninguna fecha dd/mm/aaaa contradice la lectura día/mes,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:59,plata,P-BOL-03,POS (SQLite),Toda fecha de boleta se pudo interpretar,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:59,plata,P-BOL-04,POS (SQLite),Todo cliente_id de las boletas existe en clientes,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:59,plata,P-BOL-05,POS (SQLite),Toda tienda de las boletas existe en tiendas,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:00,plata,P-DET-01,POS (SQLite),Ninguna línea con número repetido es copia exacta,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:00,plata,P-DET-02,POS (SQLite),Todo precio y monto de línea es numérico,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:00,plata,P-DET-03,POS (SQLite),"Descuento de línea en {0; 0,10; 0,25}",bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:00,plata,P-DET-04,Campañas (JSON),Ninguna línea cae en dos campañas,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:00,plata,P-BOL-06,POS (SQLite),Toda boleta válida tiene al menos una línea,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:00,plata,P-BOL-07,POS (SQLite),Todas las boletas válidas son de 2025,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:00,plata,P-COB-01,Cobertura,Al menos 80% de las boletas de origen entra a la retención,avisa,pasó,953,Seguir; revisar qué regla excluye más registros que en la corrida anterior
+20261117-230134-local,2026-11-17 23:02:05,oro,O-FEC-01,IPC (API),Todo día de 2025 tiene IPC,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-TIE-01,POS (SQLite),Cada tienda vende por un solo canal y solo el formato Online es Web,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HEC-01,Modelo,Toda línea tiene su boleta,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HEC-02,Métrica,"Clave del hecho (boleta_id, linea_id) única",bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HEC-03,Métrica,Mismas filas en el hecho que en plata.detalle,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-DIM-dim_fecha,Métrica,Llave única en dim_fecha,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HUE-dim_fecha,Métrica,Sin claves huérfanas hacia dim_fecha,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-DIM-dim_cliente,Métrica,Llave única en dim_cliente,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HUE-dim_cliente,Métrica,Sin claves huérfanas hacia dim_cliente,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-DIM-dim_tienda,Métrica,Llave única en dim_tienda,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HUE-dim_tienda,Métrica,Sin claves huérfanas hacia dim_tienda,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-MET-05,Métrica,"La cadena reproduce las cifras publicadas en el informe (±0,1 punto)",avisa,pasó,0,Seguir; el informe debe explicar el cambio en el registro de mejora
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-CON-01,Campaña de contacto,Nadie se contacta antes del día 34 sin comprar,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-CON-02,Campaña de contacto,Menos campañas implican más contactos por campaña (semanal < quincenal < mensual),bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-CON-03,Campaña de contacto,"El costo anual es la suma de preparación, mensajes y cupones",bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-CON-04,Campaña de contacto,El cupón promedio no supera el tope de $5.000,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-CON-05,Campaña de contacto,Cada cliente se contacta a lo más una vez por campaña,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:57,plata,P-PROD-01,Maestro (CSV),Toda categoría tiene un nombre canónico,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:57,plata,P-PROD-02,Maestro (CSV),Cada subcategoría pertenece a una sola categoría,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:57,plata,P-PROD-03,Maestro (CSV),Un registro por SKU,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:57,plata,P-PROD-04,Maestro (CSV),Al menos 95% de los SKU tiene costo unitario (para el margen),avisa,pasó,1,Seguir; el margen se calcula solo donde hay costo y se declara su cobertura
+20261117-230134-local,2026-11-17 23:01:58,plata,P-CAMP-01,Campañas (JSON),Descuento entre 0 y 1 y fecha de fin posterior al inicio,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:58,plata,P-IPC-01,IPC (API),12 meses distintos de 2025,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:58,plata,P-IPC-02,IPC (API),Variación mensual entre -2% y +3%,avisa,pasó,0,Seguir; revisar si la API cambió de unidad
+20261117-230134-local,2026-11-17 23:01:58,plata,P-GEO-01,POS (SQLite),Ninguna comuna apunta a una región inexistente,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:59,plata,P-GEO-02,POS (SQLite),Toda tienda tiene macrozona,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:59,plata,P-CLI-01,POS (SQLite),Toda fecha de alta se pudo interpretar,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:59,plata,P-CLI-02,POS (SQLite),Un cliente por RUT,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-DIM-dim_producto,Métrica,Llave única en dim_producto,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HUE-dim_producto,Métrica,Sin claves huérfanas hacia dim_producto,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-DIM-dim_campana,Métrica,Llave única en dim_campana,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HUE-dim_campana,Métrica,Sin claves huérfanas hacia dim_campana,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HEC-04,Métrica,El monto del hecho cuadra al peso con plata.boletas,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HEC-05,Métrica,Todas las fechas del hecho están dentro de 2025,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HEC-06,Métrica,Ninguna línea con cantidad 0,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HEC-07,Métrica,"Cada boleta tiene una sola fecha, tienda y cliente",bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HEC-08,Métrica,Visitas identificadas del modelo = cobertura de plata,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:05,oro,O-HEC-09,Margen,El costo cubre al menos 95% de la venta,avisa,pasó,284,Seguir; el margen se informa con su cobertura
+20261117-230134-local,2026-11-17 23:02:05,oro,O-DIC-01,Diccionario,Todo campo del modelo está en el diccionario y viceversa,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:43,bronce,B-POS-tiendas,POS (SQLite),pos_tiendas: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:45,bronce,B-CSV-01,Maestro (CSV),Mismas filas en bronce que en una lectura independiente,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:45,bronce,B-CSV-02,Maestro (CSV),"Trae las columnas sku, costo_unitario y precio_lista",bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:46,bronce,B-JSON-01,Campañas (JSON),Mismas campañas y SKU que el archivo,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:46,bronce,B-JSON-02,Campañas (JSON),Toda campaña tiene fecha de inicio y de fin,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:53,bronce,B-API-01,IPC (API),La serie trae los 12 meses de 2025,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:53,bronce,B-API-02,IPC (API),El IPC viene de la API y no del respaldo,avisa,falló,0,Se usa el respaldo del Volume; el pie del tablero indica la fecha del respaldo
+20261117-230134-local,2026-11-17 23:01:38,bronce,B-POS-01,POS (SQLite),Están las 7 tablas esperadas del POS,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:42,bronce,B-POS-boleta_detalle,POS (SQLite),pos_boleta_detalle: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:42,bronce,B-POS-boletas,POS (SQLite),pos_boletas: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:42,bronce,B-POS-clientes,POS (SQLite),pos_clientes: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:43,bronce,B-POS-comunas,POS (SQLite),pos_comunas: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:43,bronce,B-POS-medios_pago,POS (SQLite),pos_medios_pago: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:01:43,bronce,B-POS-regiones,POS (SQLite),pos_regiones: mismas filas en bronce que en el origen,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:09,semantica,S-VIS-01,Métrica,Visitas identificadas = cobertura,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-MET-01,Métrica,Tasas entre 0 y 1,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-MET-02,Métrica,La cascada cierra: jun = retenidos + perdidos; dic = retenidos + ganados,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-MET-03,Métrica,Cada cliente aparece una vez por ventana,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero
+20261117-230134-local,2026-11-17 23:02:12,semantica,S-MET-04,Métrica,El corte por local suma el total de activos al 30-jun,bloquea,pasó,0,Detener la cadena: no se publica la capa ni se refresca el tablero

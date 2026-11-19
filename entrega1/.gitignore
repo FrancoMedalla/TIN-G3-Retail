@@ -1,0 +1,6 @@
+raw/
+plata/
+oro/
+.ipynb_checkpoints/
+__pycache__/
+*_ejecutado.ipynb

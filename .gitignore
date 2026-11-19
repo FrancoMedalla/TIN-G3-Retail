@@ -1,6 +1,5 @@
-raw/
-plata/
-oro/
-.ipynb_checkpoints/
+lakehouse_local/
+spark-warehouse/
 __pycache__/
-*_ejecutado.ipynb
+.databricks/
+metastore_db/

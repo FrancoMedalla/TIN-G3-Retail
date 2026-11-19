@@ -1,0 +1,533 @@
+"""Genera tablero/retencion_clientes.lvdash.json (dashboard AI/BI de Databricks).
+
+    python tablero/generar_tablero.py [catalogo]
+
+DATASETS también lo usa la copia local (app_local.py), para que ambas versiones ejecuten las mismas consultas.
+"""
+import json
+import os
+import sys
+
+CAT = "workspace"
+MV = f"{CAT}.oro.mv_retencion"
+SALIDA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "retencion_clientes.lvdash.json")
+
+NARANJO, NARANJO_SUAVE, GRIS_OSCURO, GRIS, GRIS_CLARO = "#E8612C", "#F4B496", "#5F5E5A", "#8C8A84", "#D9D6CF"
+MEDIDAS = ["tasa_retencion", "tasa_reposicion", "activos_jun", "retenidos", "perdidos", "ganados",
+           "ganados_nuevos", "ganados_reactivados", "activos_dic"]
+FILTRO = "ventana_dias = CAST(:ventana AS INT) AND (:tipo = 'Todos' OR tipo_cliente = :tipo)"
+
+
+def num(expr, dec=1):
+    """Número con coma decimal y punto de miles."""
+    return f"translate(format_number({expr}, {dec}), ',.', '.,')"
+
+
+def param(keyword, defecto):
+    return {"displayName": keyword, "keyword": keyword, "dataType": "STRING",
+            "defaultSelection": {"values": {"dataType": "STRING", "values": [{"value": defecto}]}}}
+
+
+P_VENTANA, P_TIPO = param("ventana", "90"), param("tipo", "Todos")
+P_COSTO, P_CANJE, P_FRECUENCIA = param("costo_contacto", "100"), param("canje", "15"), param("frecuencia", "Mensual")
+
+ORIGEN_IPC = ("CASE WHEN origen_ipc = 'api' THEN 'API de mindicador.cl' "
+              "WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'respaldo sin fecha' "
+              "ELSE concat('respaldo del ', fecha_respaldo_ipc) END")
+ORIGEN_IPC_TITULO = ORIGEN_IPC.replace("API de mindicador.cl", "API mindicador.cl").replace("'respaldo", "'Respaldo")
+ORIGEN_IPC_CORTO = ORIGEN_IPC.replace("API de mindicador.cl", "API").replace("'respaldo", "'Respaldo")
+
+DATASETS = {
+    "opciones_ventana": ("Opciones de ventana", "SELECT explode(array('30', '90', '180')) AS ventana", []),
+    "opciones_tipo": ("Opciones de tipo de cliente",
+                      "SELECT explode(array('Todos', 'Base heredada', 'Nuevo 2025')) AS tipo_cliente", []),
+    "opciones_costo": ("Opciones de costo por mensaje",
+                       "SELECT explode(array('80', '100', '120')) AS costo_contacto", []),
+    "opciones_canje": ("Opciones de tasa de canje", "SELECT explode(array('10', '12,5', '15')) AS canje", []),
+    "opciones_frecuencia": ("Opciones de frecuencia de campaña",
+                            "SELECT explode(array('Mensual', 'Quincenal', 'Semanal')) AS frecuencia", []),
+    "kpi": ("Cifras clave", f"""
+WITH m AS (
+  SELECT {', '.join(f'MEASURE({x}) AS {x}' for x in MEDIDAS)}
+  FROM {MV}
+  WHERE {FILTRO}
+),
+cob AS (
+  SELECT MAX(CASE WHEN paso = 'Boletas en origen' THEN boletas END) AS origen,
+         MAX(CASE WHEN paso LIKE '= Visitas%' THEN boletas END) AS usadas
+  FROM {CAT}.control.cobertura
+)
+SELECT m.*,
+  concat({num('tasa_retencion * 100')}, '%') AS retencion_texto,
+  concat({num('tasa_reposicion * 100')}, '%') AS reposicion_texto,
+  CASE WHEN tasa_reposicion > 0.5 THEN 'REPONE' ELSE 'RETIENE' END AS conclusion_texto,
+  concat(CAST(retenidos AS STRING), ' de ', CAST(activos_jun AS STRING), ' siguen activos · meta: ',
+         {num('(tasa_retencion + 0.10) * 100')}, '%') AS comparacion_retencion,
+  concat(CAST(ganados AS STRING), ' de ', CAST(activos_dic AS STRING), ' son nuevos o volvieron · umbral: 50%')
+    AS comparacion_reposicion,
+  concat({num('usadas / origen * 100')}, '% de las boletas (', {num('usadas', 0)}, ' de ', {num('origen', 0)}, ')')
+    AS cobertura_texto
+FROM m CROSS JOIN cob
+""", [P_VENTANA, P_TIPO]),
+    "cascada": ("Base activa junio y diciembre", f"""
+WITH m AS (
+  SELECT MEASURE(retenidos) AS r, MEASURE(perdidos) AS p, MEASURE(ganados_nuevos) AS n,
+         MEASURE(ganados_reactivados) AS a
+  FROM {MV}
+  WHERE {FILTRO}
+)
+SELECT 'Activos al 30-jun' AS corte, 'Siguen activos (retenidos)' AS estado, r AS clientes FROM m
+UNION ALL SELECT 'Activos al 30-jun', 'Perdidos', p FROM m
+UNION ALL SELECT 'Activos al 31-dic', 'Siguen activos (retenidos)', r FROM m
+UNION ALL SELECT 'Activos al 31-dic', 'Reactivados', a FROM m
+UNION ALL SELECT 'Activos al 31-dic', 'Nuevos', n FROM m
+""", [P_VENTANA, P_TIPO]),
+    "tiendas": ("Retención por local", f"""
+WITH t AS (
+  SELECT tienda_principal AS tienda, MEASURE(retenidos) AS retenidos, MEASURE(activos_jun) AS activos_jun
+  FROM {MV}
+  WHERE {FILTRO} AND tienda_principal IS NOT NULL
+  GROUP BY tienda_principal
+),
+c AS (
+  SELECT MEASURE(tasa_retencion) AS tasa_cadena FROM {MV} WHERE {FILTRO}
+),
+w AS (
+  SELECT tienda, activos_jun, retenidos, retenidos / activos_jun AS tasa,
+    ((retenidos / activos_jun) + 1.96 * 1.96 / (2 * activos_jun)
+      - 1.96 * sqrt((retenidos / activos_jun) * (1 - retenidos / activos_jun) / activos_jun
+                    + 1.96 * 1.96 / (4 * activos_jun * activos_jun)))
+      / (1 + 1.96 * 1.96 / activos_jun) AS ic_inferior,
+    ((retenidos / activos_jun) + 1.96 * 1.96 / (2 * activos_jun)
+      + 1.96 * sqrt((retenidos / activos_jun) * (1 - retenidos / activos_jun) / activos_jun
+                    + 1.96 * 1.96 / (4 * activos_jun * activos_jun)))
+      / (1 + 1.96 * 1.96 / activos_jun) AS ic_superior
+  FROM t
+)
+SELECT w.tienda, w.activos_jun, w.retenidos, round(w.tasa, 3) AS tasa,
+  concat({num('w.tasa * 100')}, '%') AS tasa_texto, w.ic_inferior, w.ic_superior, c.tasa_cadena,
+  CASE WHEN w.ic_superior < c.tasa_cadena THEN 'Bajo la cadena'
+       WHEN w.ic_inferior > c.tasa_cadena THEN 'Sobre la cadena'
+       ELSE 'No concluyente' END AS lectura,
+  concat(CAST(round(w.ic_inferior * 100) AS INT), '% a ', CAST(round(w.ic_superior * 100) AS INT), '%')
+    AS intervalo_95,
+  concat({num('c.tasa_cadena * 100')}, '%') AS tasa_cadena_texto
+FROM w CROSS JOIN c
+ORDER BY w.tienda
+""", [P_VENTANA, P_TIPO]),
+    "vale_cuesta": ("Valor y costo de la campaña de contacto", f"""
+WITH x AS (
+  SELECT c.*, CAST(:costo_contacto AS DOUBLE) AS costo, CAST(replace(:canje, ',', '.') AS DOUBLE) / 100 AS canje
+  FROM {CAT}.oro.contacto_campanas c
+  WHERE frecuencia = :frecuencia
+),
+y AS (
+  SELECT x.*,
+    costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio AS costo_total,
+    CEIL((costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio)
+         / campanas_al_anio / margen_anual_por_cliente_reactivado) AS por_campana,
+    CEIL((costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio)
+         / margen_anual_por_cliente_reactivado) AS por_anio
+  FROM x
+)
+SELECT
+  concat('$', {num('margen_anual_por_10_puntos / 1000000', 2)}, ' MM') AS vale_texto,
+  concat('$', {num('costo_total / 1000000', 2)}, ' MM') AS cuesta_texto,
+  concat(CAST(por_campana AS STRING), ' de ', {num('contactos_por_campana', 0)}, ' contactados') AS equilibrio_texto,
+  concat(CAST(por_campana AS STRING), ' clientes') AS equilibrio_clientes,
+  concat('de ', {num('contactos_por_campana', 0)}, ' contactados en cada campaña ', lower(frecuencia))
+    AS equilibrio_detalle,
+  concat('$', {num('costo_total / campanas_al_anio', 0)}) AS costo_campana_texto,
+  {num('contactos_por_campana', 0)} AS contactos_texto,
+  concat(CAST(dia_contacto_min AS STRING), ' a ', CAST(dia_contacto_max AS STRING), ' (mediana ',
+         CAST(dia_contacto_mediana AS STRING), ')') AS dia_texto,
+  concat({num('pct_vuelven_solos_90 * 100', 0)}, ' de cada 100') AS vuelven_texto,
+  concat('$', {num('margen_anual_por_cliente_reactivado', 0)}) AS margen_cliente_texto,
+  concat(CAST(por_anio AS STRING), ' (meta: ', CAST(clientes_meta_10_puntos AS STRING), ')') AS clientes_anio_texto
+FROM y
+""", [P_COSTO, P_CANJE, P_FRECUENCIA]),
+    "frecuencias": ("Costo de la campaña según su frecuencia", f"""
+SELECT frecuencia, orden,
+  CAST(campanas_al_anio AS STRING) AS campanas,
+  {num('contactos_al_anio', 0)} AS contactos,
+  concat(CAST(dia_contacto_min AS STRING), ' a ', CAST(dia_contacto_max AS STRING), ' (mediana ',
+         CAST(dia_contacto_mediana AS STRING), ')') AS dias,
+  concat('$', {num('costo_preparacion_anual / 1000000', 2)}, ' MM') AS preparacion,
+  concat('$', {num('costo_mensajes_anual / 1000000', 2)}, ' MM') AS mensajes,
+  concat('$', {num('costo_cupones_anual / 1000000', 2)}, ' MM') AS cupones,
+  concat('$', {num('costo_anual / 1000000', 2)}, ' MM') AS total,
+  concat(CAST(clientes_para_pagar_al_anio AS STRING), ' al año (', CAST(clientes_para_pagar_por_campana AS STRING),
+         ' por campaña)') AS clientes,
+  CASE WHEN se_paga_antes_de_la_meta = 1 THEN 'Sí' ELSE 'No' END AS antes_de_la_meta
+FROM {CAT}.oro.contacto_campanas
+ORDER BY orden
+""", []),
+    "frecuencias_costos": ("Componentes del costo por frecuencia", f"""
+SELECT frecuencia, orden, 'Preparación (4 h por campaña)' AS componente, round(costo_preparacion_anual / 1000000, 2)
+  AS millones FROM {CAT}.oro.contacto_campanas
+UNION ALL SELECT frecuencia, orden, 'Cupones canjeados', round(costo_cupones_anual / 1000000, 2)
+  FROM {CAT}.oro.contacto_campanas
+UNION ALL SELECT frecuencia, orden, 'Mensajes', round(costo_mensajes_anual / 1000000, 2)
+  FROM {CAT}.oro.contacto_campanas
+""", []),
+    "estado": ("Estado de la última corrida", f"""
+SELECT concat('Fuente: POS, maestro, campañas e IPC (mindicador.cl), 2025 · Dueño del tablero: ',
+              coalesce(dueno_tablero, 'Marketing'), ' · Datos: ', dueno_dato, ' · Actualizado: ',
+              substr(fecha_hora, 1, 16), ' · Pruebas: ', CAST(pruebas_ok AS STRING),
+              ' de ', CAST(pruebas AS STRING), ' · IPC: ', {ORIGEN_IPC}) AS pie
+FROM {CAT}.control.estado_corrida
+ORDER BY fecha_hora DESC
+LIMIT 1
+""", []),
+    "ventanas": ("Retención y reposición por ventana", f"""
+WITH m AS (
+  SELECT ventana_dias, MEASURE(tasa_retencion) AS r, MEASURE(tasa_reposicion) AS p
+  FROM {MV}
+  GROUP BY ventana_dias
+),
+e AS (
+  SELECT ventana_dias, r, p,
+    concat(CAST(ventana_dias AS STRING), ' días',
+           CASE ventana_dias WHEN 90 THEN ' (definición)' WHEN 180 THEN ' (alternativa)'
+                ELSE ' (referencia de la contraparte)' END) AS ventana
+  FROM m
+)
+SELECT ventana, ventana_dias, 'Tasa de retención semestral' AS medida, round(r, 3) AS valor FROM e
+UNION ALL SELECT ventana, ventana_dias, 'Tasa de reposición', round(p, 3) FROM e
+""", []),
+    "ventanas_tabla": ("Detalle por ventana", f"""
+SELECT
+  concat(CAST(ventana_dias AS STRING), ' días') AS ventana,
+  concat({num('MEASURE(tasa_retencion) * 100')}, '% (', CAST(MEASURE(retenidos) AS STRING), ' de ',
+         CAST(MEASURE(activos_jun) AS STRING), ')') AS retencion,
+  concat({num('MEASURE(tasa_reposicion) * 100')}, '% (', CAST(MEASURE(ganados) AS STRING), ' de ',
+         CAST(MEASURE(activos_dic) AS STRING), ')') AS reposicion,
+  CASE WHEN MEASURE(tasa_reposicion) > 0.5 THEN 'Repone' ELSE 'Retiene' END AS lectura
+FROM {MV}
+GROUP BY ventana_dias
+ORDER BY ventana_dias
+""", []),
+    "antiguedad": ("Retención por antigüedad: sensibilidad", f"""
+SELECT 'Todos los clientes' AS grupo, tipo_cliente, round(MEASURE(tasa_retencion), 3) AS tasa,
+       MEASURE(activos_jun) AS activos_jun
+FROM {MV}
+WHERE ventana_dias = 90
+GROUP BY tipo_cliente
+UNION ALL
+SELECT 'Sin los 311 con alta posterior a su primera compra', tipo_cliente, round(MEASURE(tasa_retencion), 3),
+       MEASURE(activos_jun)
+FROM {MV}
+WHERE ventana_dias = 90 AND alta_posterior_a_primera_compra = 0
+GROUP BY tipo_cliente
+""", []),
+    "pruebas": ("Pruebas de la última corrida publicada", f"""
+SELECT capa, id_prueba, fuente_o_metrica, que_verifica,
+  CASE WHEN severidad = 'bloquea' THEN 'Bloquea' ELSE 'Advierte' END AS severidad,
+  CASE WHEN resultado = 'pasó' THEN 'Aprobada' WHEN severidad = 'bloquea' THEN 'Falló' ELSE 'Advertencia' END
+    AS resultado,
+  filas_que_fallan, accion_si_falla
+FROM {CAT}.control.pruebas_resultados
+WHERE id_corrida = (SELECT id_corrida FROM {CAT}.control.estado_corrida ORDER BY fecha_hora DESC LIMIT 1)
+ORDER BY CASE WHEN resultado = 'Aprobada' THEN 1 ELSE 0 END,
+  CASE capa WHEN 'bronce' THEN 1 WHEN 'plata' THEN 2 WHEN 'oro' THEN 3 ELSE 4 END, id_prueba
+""", []),
+    "resumen_calidad": ("Resumen de calidad de la última corrida", f"""
+SELECT concat(CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING)) AS aprobadas_texto,
+  CAST(avisos AS STRING) AS avisos_texto,
+  {ORIGEN_IPC_TITULO} AS origen_ipc_texto,
+  fecha_hora AS actualizado
+FROM {CAT}.control.estado_corrida
+ORDER BY fecha_hora DESC
+LIMIT 1
+""", []),
+    "corridas": ("Historial de corridas", f"""
+SELECT id_corrida, fecha_hora,
+  concat(CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING)) AS pruebas_aprobadas,
+  {ORIGEN_IPC_CORTO} AS origen_ipc
+FROM {CAT}.control.estado_corrida
+ORDER BY fecha_hora DESC
+LIMIT 10
+""", []),
+    "linaje": ("Linaje de la métrica", f"""
+SELECT campo_origen, regla_limpieza, campo_modelo, uso_en_la_metrica, pantalla
+FROM {CAT}.control.linaje_metrica
+ORDER BY orden
+""", []),
+}
+
+
+def dataset(nombre):
+    titulo, sql, params = DATASETS[nombre]
+    lineas = [ln + "\n" for ln in sql.strip().split("\n")]
+    d = {"name": nombre, "displayName": titulo, "queryLines": lineas}
+    if params:
+        d["parameters"] = params
+    return d
+
+
+def pos(x, y, w, h):
+    return {"x": x, "y": y, "width": w, "height": h}
+
+
+def texto(nombre, lineas, p):
+    return {"widget": {"name": nombre, "multilineTextboxSpec": {"lines": [ln + "\n" for ln in lineas]}}, "position": p}
+
+
+def contador(nombre, ds, campo, titulo, p, formato=None, tam=None, descripcion=None):
+    enc = {"fieldName": campo, "displayName": titulo}
+    if formato:
+        enc["format"] = formato
+    if tam:
+        enc["style"] = {"fontSize": tam}
+    frame = {"showTitle": True, "title": titulo}
+    if descripcion:
+        frame.update(showDescription=True, description=descripcion)
+    return {"widget": {"name": nombre,
+                       "queries": [{"name": "main_query", "query": {
+                           "datasetName": ds, "fields": [{"name": campo, "expression": f"`{campo}`"}],
+                           "disaggregated": True}}],
+                       "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": enc}, "frame": frame}},
+            "position": p}
+
+
+def filtro(nombre, titulo, opciones, campo, parametro, datasets, defecto, p):
+    queries = [{"name": f"{nombre}_opciones", "query": {
+        "datasetName": opciones, "fields": [{"name": campo, "expression": f"`{campo}`"}], "disaggregated": False}}]
+    campos = [{"fieldName": campo, "displayName": titulo, "queryName": f"{nombre}_opciones"}]
+    for ds in datasets:
+        q = f"{nombre}_{ds}"
+        queries.append({"name": q, "query": {"datasetName": ds,
+                                             "parameters": [{"name": parametro, "keyword": parametro}],
+                                             "disaggregated": False}})
+        campos.append({"parameterName": parametro, "queryName": q})
+    return {"widget": {"name": nombre, "queries": queries,
+                       "spec": {"version": 2, "widgetType": "filter-single-select",
+                                "encodings": {"fields": campos},
+                                "selection": {"defaultSelection": {"values": {
+                                    "dataType": "STRING", "values": [{"value": defecto}]}}},
+                                "frame": {"showTitle": True, "title": titulo}}},
+            "position": p}
+
+
+def barras(nombre, ds, x, y, color, titulo, p, mapeo=None, horizontal=False, agrupadas=False, formato=None,
+           titulo_valor=None, leyenda=None, descripcion=None):
+    campos = [{"name": x, "expression": f"`{x}`"}, {"name": color, "expression": f"`{color}`"},
+              {"name": f"sum({y})", "expression": f"SUM(`{y}`)"}]
+    if color == x:
+        campos = campos[:1] + campos[2:]
+    eje_cat = {"fieldName": x, "scale": {"type": "categorical"}, "axis": {"hideTitle": True}, "displayName": x}
+    eje_val = {"fieldName": f"sum({y})", "scale": {"type": "quantitative"}, "displayName": titulo_valor or y}
+    if titulo_valor:
+        eje_val["axis"] = {"title": titulo_valor}
+    if formato:
+        eje_val["format"] = formato
+    col = {"fieldName": color, "scale": {"type": "categorical"}, "displayName": leyenda or color}
+    if mapeo:
+        col["scale"]["mappings"] = [{"value": k, "color": v} for k, v in mapeo.items()]
+    enc = {"x": eje_val, "y": eje_cat} if horizontal else {"x": eje_cat, "y": eje_val}
+    enc["color"] = col
+    enc["label"] = {"show": True}
+    frame = {"showTitle": True, "title": titulo}
+    if descripcion:
+        frame.update(showDescription=True, description=descripcion)
+    spec = {"version": 3, "widgetType": "bar", "encodings": enc, "frame": frame,
+            "mark": {"layout": "group" if agrupadas else "stack"}}
+    return {"widget": {"name": nombre, "queries": [{"name": "main_query", "query": {
+        "datasetName": ds, "fields": campos, "disaggregated": False}}], "spec": spec}, "position": p}
+
+
+def tabla(nombre, ds, columnas, titulo, p):
+    """columnas: (campo, título, tipo) con tipo 'texto', 'entero' o 'porcentaje'."""
+    tipos = {"texto": ("string", "string", None, "left"), "entero": ("integer", "number", "0", "right"),
+             "porcentaje": ("float", "number", "0.0%", "right")}
+    cols = []
+    for i, (campo, titulo_col, tipo) in enumerate(columnas):
+        t, mostrar, formato, alinear = tipos[tipo]
+        col = {"fieldName": campo, "booleanValues": ["false", "true"], "imageUrlTemplate": "{{ @ }}",
+               "imageTitleTemplate": "{{ @ }}", "imageWidth": "", "imageHeight": "", "linkUrlTemplate": "{{ @ }}",
+               "linkTextTemplate": "{{ @ }}", "linkTitleTemplate": "{{ @ }}", "linkOpenInNewTab": True,
+               "type": t, "displayAs": mostrar, "visible": True, "order": i, "title": titulo_col,
+               "allowSearch": False, "alignContent": alinear, "allowHTML": False, "highlightLinks": False,
+               "useMonospaceFont": False, "preserveWhitespace": False, "displayName": titulo_col}
+        if formato:
+            col["numberFormat"] = formato
+        cols.append(col)
+    spec = {"version": 1, "widgetType": "table", "encodings": {"columns": cols}, "invisibleColumns": [],
+            "allowHTMLByDefault": False, "itemsPerPage": 25, "paginationSize": "default", "condensed": True,
+            "withRowNumber": False, "frame": {"showTitle": True, "title": titulo}}
+    return {"widget": {"name": nombre, "queries": [{"name": "main_query", "query": {
+        "datasetName": ds, "fields": [{"name": c, "expression": f"`{c}`"} for c, _, _ in columnas],
+        "disaggregated": True}}], "spec": spec}, "position": p}
+
+
+PCT = {"type": "number-percent", "decimalPlaces": {"type": "exact", "places": 1}}
+PARAM_PRINCIPAL = ["kpi", "cascada", "tiendas"]
+
+pagina_principal = [
+    texto("titulo", ["## ¿La cadena está reteniendo a sus clientes o los está reponiendo?",
+                     "Multitienda del Sur · clientes identificados del programa · cortes al 30-jun y al 31-dic de 2025. "
+                     "**Para** Marketing (dueño del tablero), Gerencia Comercial y Finanzas, **cada mes** al cierre: "
+                     "decidir a quién contactar y qué local revisar."], pos(0, 0, 6, 2)),
+    filtro("filtro_ventana", "Ventana de cliente activo (días)", "opciones_ventana", "ventana", "ventana",
+           PARAM_PRINCIPAL, "90", pos(0, 2, 2, 1)),
+    filtro("filtro_tipo", "Tipo de cliente", "opciones_tipo", "tipo_cliente", "tipo", PARAM_PRINCIPAL, "Todos",
+           pos(2, 2, 2, 1)),
+    texto("regla", ["**Regla de lectura**, fijada antes de calcular: la cadena *repone* si más del 50% de los "
+                    "activos al 31-dic no estaba activo al 30-jun."], pos(4, 2, 2, 1)),
+    contador("kpi_retencion", "kpi", "retencion_texto", "Tasa de retención semestral (activos al 30-jun que siguen "
+             "activos al 31-dic)", pos(0, 3, 2, 2), tam=48),
+    contador("kpi_reposicion", "kpi", "reposicion_texto", "Tasa de reposición (activos al 31-dic que no estaban "
+             "activos al 30-jun)", pos(2, 3, 2, 2), tam=48),
+    contador("kpi_conclusion", "kpi", "conclusion_texto", "Respuesta según la regla de lectura", pos(4, 3, 2, 2),
+             tam=48),
+    contador("cmp_retencion", "kpi", "comparacion_retencion", "Frente a la meta", pos(0, 5, 2, 1), tam=14),
+    contador("cmp_reposicion", "kpi", "comparacion_reposicion", "Frente al umbral", pos(2, 5, 2, 1), tam=14),
+    contador("cobertura", "kpi", "cobertura_texto", "Cobertura (las boletas anónimas no entran)", pos(4, 5, 2, 1),
+             tam=14),
+    barras("grafico_cascada", "cascada", "corte", "clientes", "estado",
+           "Clientes activos al 30-jun y al 31-dic (n.º de clientes)", pos(0, 6, 3, 6),
+           mapeo={"Siguen activos (retenidos)": GRIS, "Perdidos": GRIS_CLARO, "Reactivados": NARANJO_SUAVE,
+                  "Nuevos": NARANJO},
+           titulo_valor="Clientes", leyenda="Estado",
+           descripcion="En naranjo, los reemplazos: clientes activos en diciembre que no lo estaban en junio."),
+    barras("grafico_locales", "tiendas", "tienda", "tasa", "lectura",
+           "Tasa de retención semestral por local principal (% de clientes)", pos(3, 6, 3, 6),
+           mapeo={"Bajo la cadena": NARANJO, "No concluyente": GRIS_CLARO, "Sobre la cadena": GRIS_OSCURO},
+           horizontal=True, formato=PCT, titulo_valor="Retención", leyenda="Lectura",
+           descripcion="En naranjo, el local cuyo intervalo de confianza al 95% queda completo bajo la tasa de la "
+                       "cadena. Orden alfabético: sin ranking."),
+    texto("titulo_accion", ["### Contactar a quien cumple 34 días sin comprar: cuánto vale y cuánto cuesta",
+                            "Margen bruto en pesos de diciembre de 2025. Costos informados por Marketing (17-nov): "
+                            "mensaje de $80 a $120, 4 horas de preparación por campaña a $15.000 la hora y cupón de "
+                            "10% (tope $5.000) que solo cuesta si se canjea."], pos(0, 12, 6, 1)),
+    contador("vale", "vale_cuesta", "vale_texto", "Vale: margen anual de 10 puntos más de retención (49 clientes)",
+             pos(0, 13, 2, 2), tam=40),
+    contador("cuesta", "vale_cuesta", "cuesta_texto", "Cuesta: la campaña durante un año", pos(2, 13, 2, 2),
+             tam=40),
+    contador("equilibrio", "vale_cuesta", "equilibrio_texto", "Cada campaña se paga si reactiva", pos(4, 13, 2, 2),
+             tam=28),
+    filtro("filtro_frecuencia", "Frecuencia de la campaña", "opciones_frecuencia", "frecuencia", "frecuencia",
+           ["vale_cuesta"], "Mensual", pos(0, 15, 2, 1)),
+    filtro("filtro_costo", "Costo por mensaje ($)", "opciones_costo", "costo_contacto", "costo_contacto",
+           ["vale_cuesta"], "100", pos(2, 15, 2, 1)),
+    filtro("filtro_canje", "Clientes contactados que canjean el cupón (%)", "opciones_canje", "canje", "canje",
+           ["vale_cuesta"], "15", pos(4, 15, 2, 1)),
+    contador("costo_campana", "vale_cuesta", "costo_campana_texto", "Costo por campaña", pos(0, 16, 1, 1), tam=16),
+    contador("contactos", "vale_cuesta", "contactos_texto", "Contactos por campaña", pos(1, 16, 1, 1), tam=16),
+    contador("dia_contacto", "vale_cuesta", "dia_texto", "Días sin comprar al contacto", pos(2, 16, 1, 1), tam=16),
+    contador("vuelven_solos", "vale_cuesta", "vuelven_texto", "Vuelven solos en 90 días", pos(3, 16, 1, 1), tam=16),
+    contador("margen_cliente", "vale_cuesta", "margen_cliente_texto", "Margen anual por cliente reactivado",
+             pos(4, 16, 1, 1), tam=16),
+    contador("clientes_anio", "vale_cuesta", "clientes_anio_texto", "Clientes que pagan el año", pos(5, 16, 1, 1),
+             tam=16),
+    tabla("tabla_locales", "tiendas",
+          [("tienda", "Local principal", "texto"), ("activos_jun", "Activos al 30-jun", "entero"),
+           ("retenidos", "Siguen activos al 31-dic", "entero"), ("tasa_texto", "Tasa de retención", "texto"),
+           ("intervalo_95", "Intervalo de confianza 95%", "texto"), ("tasa_cadena_texto", "Cadena", "texto"),
+           ("lectura", "Lectura", "texto")],
+          "Detalle por local", pos(0, 17, 6, 7)),
+    contador("pie", "estado", "pie", "Fuente y estado de los datos", pos(0, 24, 6, 1), tam=12),
+]
+
+pagina_definicion = [
+    texto("titulo_def", ["## Decisión de definición: la ventana de cliente activo",
+                         "La definición mueve el número, pero no la conclusión: con 30, 90 y 180 días, más de la mitad "
+                         "de los activos de diciembre son reemplazos."], pos(0, 0, 6, 2)),
+    barras("grafico_ventanas", "ventanas", "ventana_dias", "valor", "medida",
+           "Retención y reposición según la ventana de cliente activo (% de clientes)", pos(0, 2, 4, 6),
+           mapeo={"Tasa de retención semestral": GRIS, "Tasa de reposición": NARANJO}, agrupadas=True, formato=PCT,
+           titulo_valor="% de clientes", leyenda="Medida",
+           descripcion="Eje horizontal: días de la ventana. 90 es la definición; 180, la alternativa; 30, la "
+                       "referencia de la contraparte."),
+    texto("por_que_90", ["### Por qué 90 días",
+                         "La mitad de los clientes vuelve en 13 días y el 93% de las pausas entre compras dura menos "
+                         "de 90 días. Con 30 días, más de un cuarto de las pausas normales se leería como pérdida.",
+                         "",
+                         "**Regla de lectura**, fijada antes de calcular: la cadena repone si más del 50% de los "
+                         "activos al 31-dic no estaba activo al 30-jun."], pos(4, 2, 2, 6)),
+    tabla("tabla_ventanas", "ventanas_tabla",
+          [("ventana", "Ventana", "texto"), ("retencion", "Tasa de retención semestral", "texto"),
+           ("reposicion", "Tasa de reposición", "texto"), ("lectura", "Lectura", "texto")],
+          "Detalle por ventana", pos(0, 8, 6, 3)),
+    barras("grafico_antiguedad", "antiguedad", "tipo_cliente", "tasa", "grupo",
+           "Tasa de retención semestral con 90 días por tipo de cliente (% de clientes)", pos(0, 11, 4, 5),
+           mapeo={"Todos los clientes": GRIS, "Sin los 311 con alta posterior a su primera compra": NARANJO},
+           agrupadas=True, formato=PCT, titulo_valor="Retención", leyenda="Grupo"),
+    texto("nota_antiguedad", ["### Sensibilidad de la antigüedad",
+                              "El tipo de cliente se define por la fecha de alta en la tarjeta. 311 clientes tienen "
+                              "el alta después de su primera compra; todos tienen el alta en 2025, así que la base "
+                              "heredada no cambia. Sin ellos, la brecha entre nuevos y heredada se reduce de 8,9 a "
+                              "3,7 puntos: no es concluyente. La conclusión (repone) no depende de esta definición."],
+          pos(4, 11, 2, 5)),
+    texto("titulo_frecuencia", ["## Decisión de frecuencia de la campaña de contacto",
+                                "Preparar una campaña cuesta lo mismo sin importar a cuántos clientes llegue, así que "
+                                "la frecuencia decide el costo. Costos con $100 por mensaje y canje de 15%."],
+          pos(0, 16, 6, 1)),
+    barras("grafico_frecuencias", "frecuencias_costos", "frecuencia", "millones", "componente",
+           "Costo anual de la campaña según su frecuencia ($ MM, pesos de diciembre de 2025)", pos(0, 17, 4, 6),
+           mapeo={"Preparación (4 h por campaña)": NARANJO, "Cupones canjeados": GRIS, "Mensajes": GRIS_CLARO},
+           titulo_valor="$ MM", leyenda="Componente",
+           descripcion="En naranjo, la preparación: 4 horas de un analista por campaña, a $15.000 la hora."),
+    texto("por_que_mensual", ["### Por qué mensual",
+                              "Solo la campaña mensual se paga antes de llegar a la meta: necesita 31 clientes "
+                              "reactivados al año (3 por campaña) y la meta son 49. La semanal necesita 91 y la "
+                              "quincenal 53. Además, es el ritmo con que Marketing ya trabaja.",
+                              "",
+                              "**Lo que se cede:** el contacto llega entre los días 34 y 63 sin comprar (mediana 45). "
+                              "Si la cadena entrega la lista de clientes y la preparación baja, una frecuencia mayor "
+                              "acerca el contacto al día 34."], pos(4, 17, 2, 6)),
+    tabla("tabla_frecuencias", "frecuencias",
+          [("frecuencia", "Frecuencia", "texto"), ("campanas", "Campañas al año", "texto"),
+           ("contactos", "Contactos al año", "texto"), ("dias", "Días sin comprar al contacto", "texto"),
+           ("preparacion", "Preparación", "texto"), ("mensajes", "Mensajes", "texto"),
+           ("cupones", "Cupones", "texto"), ("total", "Costo anual", "texto"),
+           ("clientes", "Clientes que lo pagan", "texto"), ("antes_de_la_meta", "¿Antes de la meta (49)?", "texto")],
+          "Detalle por frecuencia", pos(0, 23, 6, 3)),
+]
+
+pagina_calidad = [
+    texto("titulo_calidad", ["## Calidad de datos y trazabilidad",
+                             "Cada corrida de la cadena ejecuta pruebas en todas las capas. Una prueba que *bloquea* "
+                             "detiene la publicación y el tablero conserva la última corrida válida; una que "
+                             "*advierte* deja continuar y queda indicada aquí y en el pie."], pos(0, 0, 6, 2)),
+    contador("cal_aprobadas", "resumen_calidad", "aprobadas_texto", "Pruebas aprobadas en la última corrida",
+             pos(0, 2, 2, 2), tam=40),
+    contador("cal_avisos", "resumen_calidad", "avisos_texto", "Advertencias", pos(2, 2, 2, 2), tam=40),
+    contador("cal_ipc", "resumen_calidad", "origen_ipc_texto", "Origen del IPC", pos(4, 2, 2, 2), tam=28),
+    tabla("tabla_pruebas", "pruebas",
+          [("capa", "Capa", "texto"), ("id_prueba", "Prueba", "texto"), ("fuente_o_metrica", "Protege", "texto"),
+           ("que_verifica", "Qué verifica", "texto"), ("severidad", "Tipo", "texto"),
+           ("resultado", "Resultado", "texto"), ("filas_que_fallan", "Filas que fallan", "entero"),
+           ("accion_si_falla", "Acción si falla", "texto")],
+          "Pruebas de la última corrida publicada", pos(0, 4, 6, 8)),
+    tabla("tabla_corridas", "corridas",
+          [("id_corrida", "Corrida", "texto"), ("fecha_hora", "Fecha y hora", "texto"),
+           ("pruebas_aprobadas", "Pruebas aprobadas", "texto"), ("origen_ipc", "Origen del IPC", "texto")],
+          "Últimas corridas publicadas", pos(0, 12, 6, 4)),
+    tabla("tabla_linaje", "linaje",
+          [("campo_origen", "Campo de origen", "texto"), ("regla_limpieza", "Regla de limpieza", "texto"),
+           ("campo_modelo", "Campo del modelo", "texto"), ("uso_en_la_metrica", "Uso en la métrica", "texto"),
+           ("pantalla", "Pantalla", "texto")],
+          "Linaje de la métrica: del campo de origen a la pantalla", pos(0, 16, 6, 6)),
+]
+
+tablero = {
+    "datasets": [dataset(n) for n in DATASETS],
+    "pages": [
+        {"name": "principal", "displayName": "Retención y reposición", "pageType": "PAGE_TYPE_CANVAS",
+         "layout": pagina_principal},
+        {"name": "definicion", "displayName": "Decisiones", "pageType": "PAGE_TYPE_CANVAS",
+         "layout": pagina_definicion},
+        {"name": "calidad", "displayName": "Calidad de datos", "pageType": "PAGE_TYPE_CANVAS",
+         "layout": pagina_calidad},
+    ],
+    "uiSettings": {"theme": {"widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"}},
+}
+
+if __name__ == "__main__":
+    contenido = json.dumps(tablero, ensure_ascii=False, indent=2)
+    if len(sys.argv) > 1 and sys.argv[1] != CAT:
+        contenido = contenido.replace(f"{CAT}.", f"{sys.argv[1]}.")
+    with open(SALIDA, "w", encoding="utf-8") as f:
+        f.write(contenido)
+    print("Tablero generado:", SALIDA)

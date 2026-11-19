@@ -1,0 +1,517 @@
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # 04 · Capa semántica y consumo
+# MAGIC - `oro.cliente_ventana`: una fila por cliente y ventana (30, 90 y 180 días) con su estado entre los cortes del
+# MAGIC   30-jun y el 31-dic: retenido, perdido, ganado nuevo o ganado reactivado.
+# MAGIC - `oro.mv_retencion`: metric view con la definición de las medidas (`METRICAS` en `comun.py`).
+# MAGIC - Tablas de consumo del informe y del tablero, todas consultadas desde la metric view.
+# MAGIC - Evidencia complementaria, caso de negocio en margen, estado de la corrida y copia de las cifras en CSV.
+
+# COMMAND ----------
+
+import os
+import shutil
+
+import numpy as np
+import pandas as pd
+
+from comun import (CIFRAS_PUBLICADAS, CORTE_1, CORTE_2, COSTO_CONTACTO, COSTO_HORA, CUPON, DIA_CONTACTO,
+                   DUENO_DATOS, DUENO_DEFINICION, DUENO_TABLERO, EN_DATABRICKS, FRECUENCIA_CAMPANA, FRECUENCIAS,
+                   HORAS_PREPARACION, ID_CORRIDA, DIR_SALIDAS, METRICAS, REGLA_LECTURA, TASA_CANJE, TOPE_CUPON,
+                   UMBRAL_LECTURA, VENTANA_BASE, VENTANAS, Bitacora, Pruebas, a_pandas, ahora, escribir_pandas,
+                   guardar_salida_csv, leer, nombre_tabla, ruta_local, spark, sql_metricas, yaml_metric_view)
+
+bit = Bitacora("semantica")
+registrar = bit.registrar
+pruebas = Pruebas("semantica")
+C1, C2 = pd.Timestamp(CORTE_1), pd.Timestamp(CORTE_2)
+
+
+def pct(x, decimales=1):
+    return f"{x * 100:.{decimales}f}%".replace(".", ",")
+
+
+def dec(x, decimales=1):
+    return f"{x:.{decimales}f}".replace(".", ",")
+
+
+fact = a_pandas("oro", "fact_venta_linea")
+dim_cliente, dim_tienda = a_pandas("oro", "dim_cliente"), a_pandas("oro", "dim_tienda")
+dim_fecha = a_pandas("oro", "dim_fecha")
+cobertura = a_pandas("control", "cobertura").sort_values("orden").reset_index(drop=True)
+n_origen = int(cobertura.loc[cobertura.paso == "Boletas en origen", "boletas"].iloc[0])
+n_usadas = int(cobertura.loc[cobertura.paso.str.startswith("= Visitas"), "boletas"].iloc[0])
+
+# COMMAND ----------
+
+# MAGIC %md ## Visitas: boleta con monto neto > 0 (regla B07), solo clientes identificados
+
+# COMMAND ----------
+
+
+def visitas_por_boleta(hechos):
+    b = (hechos.groupby(["boleta_id", "fecha_key", "cliente_key", "tienda_key"], as_index=False)
+               .agg(monto_boleta=("monto_linea", "sum"), monto_boleta_real_dic2025=("monto_linea_real_dic2025", "sum"),
+                    margen_boleta_real_dic2025=("margen_linea_real_dic2025", "sum")))
+    b["es_visita"] = b.monto_boleta > 0
+    b["es_anonima"] = b.cliente_key.eq(0)
+    return b
+
+
+vis = visitas_por_boleta(fact)
+vis = vis[vis.es_visita & ~vis.es_anonima].copy()
+vis["fecha"] = pd.to_datetime(vis.fecha_key.astype(str), format="%Y%m%d")
+vis = vis.merge(dim_cliente[["cliente_key", "tipo_cliente", "primera_visita_2025"]], on="cliente_key", how="left")
+pruebas.verificar("S-VIS-01", "Métrica", "Visitas identificadas = cobertura", len(vis) == n_usadas,
+                  abs(len(vis) - n_usadas))
+
+tipo_de = dim_cliente.set_index("cliente_key").tipo_cliente
+primera_de = pd.to_datetime(dim_cliente.set_index("cliente_key").primera_visita_2025)
+segmento_de = dim_cliente.set_index("cliente_key").segmento
+alta_post = (pd.to_datetime(dim_cliente.fecha_alta) > pd.to_datetime(dim_cliente.primera_visita_2025))
+alta_post_de = pd.Series(alta_post.astype(int).values, index=dim_cliente.cliente_key)
+
+# COMMAND ----------
+
+# MAGIC %md ## Estado de cada cliente por ventana
+# MAGIC Activo al corte C con ventana W: al menos una visita entre C − (W − 1) días y C, inclusive.
+
+# COMMAND ----------
+
+
+def activos(corte, w):
+    desde = corte - pd.Timedelta(days=w - 1)
+    return set(vis[(vis.fecha >= desde) & (vis.fecha <= corte)].cliente_key)
+
+
+def tienda_principal(w):
+    desde = C1 - pd.Timedelta(days=w - 1)
+    v = vis[(vis.fecha >= desde) & (vis.fecha <= C1)].merge(dim_tienda[["tienda_key", "tienda", "canal"]], on="tienda_key")
+    return v.groupby("cliente_key").tienda.agg(lambda x: x.value_counts().index[0])
+
+
+filas = []
+for w in VENTANAS:
+    base, final = activos(C1, w), activos(C2, w)
+    tp = tienda_principal(w)
+    for k in sorted(base | final):
+        jun, dic = int(k in base), int(k in final)
+        ganado = int(dic and not jun)
+        nuevo = int(ganado and tipo_de[k] == "Nuevo 2025" and primera_de[k] > C1)
+        filas.append({"cliente_key": int(k), "ventana_dias": w, "activo_jun": jun, "activo_dic": dic,
+                      "retenido": int(jun and dic), "perdido": int(jun and not dic), "ganado": ganado,
+                      "ganado_nuevo": nuevo, "ganado_reactivado": ganado - nuevo,
+                      "tipo_cliente": tipo_de[k], "segmento": segmento_de[k],
+                      "tienda_principal": tp.get(k) if jun else None,
+                      "alta_posterior_a_primera_compra": int(alta_post_de[k])})
+cliente_ventana = pd.DataFrame(filas)
+
+# COMMAND ----------
+
+# MAGIC %md ## Metric view
+
+# COMMAND ----------
+
+escribir_pandas(cliente_ventana, "oro", "cliente_ventana")
+fuente_mv = nombre_tabla("oro", "cliente_ventana") if EN_DATABRICKS else "cliente_ventana"
+usa_metric_view = False
+if EN_DATABRICKS:
+    try:
+        spark.sql(f"CREATE OR REPLACE VIEW {nombre_tabla('oro', 'mv_retencion')} WITH METRICS LANGUAGE YAML AS $$\n"
+                  f"{yaml_metric_view(fuente_mv)}\n$$")
+        usa_metric_view = True
+        print("Metric view creada:", nombre_tabla("oro", "mv_retencion"))
+    except Exception as e:
+        print("No se pudo crear la metric view; se usa la consulta SQL equivalente generada desde METRICAS:", str(e)[:300])
+else:
+    leer("oro", "cliente_ventana").createOrReplaceTempView("cliente_ventana")
+
+
+def consultar(dimensiones=("ventana_dias",), filtro=None):
+    """Consulta las medidas en la metric view o, si no está disponible, en la consulta SQL equivalente."""
+    dims = list(dimensiones)
+    if usa_metric_view:
+        medidas = ", ".join(f"MEASURE({m}) AS {m}" for m in METRICAS)
+        donde = f"WHERE {filtro}" if filtro else ""
+        q = (f"SELECT {', '.join(dims)}, {medidas} FROM {nombre_tabla('oro', 'mv_retencion')} {donde} "
+             f"GROUP BY {', '.join(dims)} ORDER BY {', '.join(dims)}")
+    else:
+        q = sql_metricas(fuente_mv, dims, filtro)
+    return spark.sql(q).toPandas()
+
+
+metrica = consultar(["ventana_dias"])
+metrica["conclusion"] = np.where(metrica.tasa_reposicion > UMBRAL_LECTURA, "Repone", "Retiene")
+metrica["regla_de_lectura"] = REGLA_LECTURA
+metrica["es_definicion_base"] = metrica.ventana_dias.eq(VENTANA_BASE)
+print(metrica[["ventana_dias", "activos_jun", "retenidos", "tasa_retencion", "tasa_reposicion", "conclusion"]])
+
+# COMMAND ----------
+
+# MAGIC %md ## Cortes: tipo de cliente, sensibilidad K05, segmento y local (con intervalo de confianza)
+
+# COMMAND ----------
+
+
+def wilson(k, n, z=1.96):
+    if n == 0:
+        return np.nan, np.nan
+    p = k / n
+    c = (p + z * z / (2 * n)) / (1 + z * z / n)
+    h = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return c - h, c + h
+
+
+por_tipo = consultar(["ventana_dias", "tipo_cliente"])
+por_tipo_sin311 = consultar(["ventana_dias", "tipo_cliente"], "alta_posterior_a_primera_compra = 0")
+sens = (por_tipo[["ventana_dias", "tipo_cliente", "activos_jun", "tasa_retencion"]]
+        .merge(por_tipo_sin311[["ventana_dias", "tipo_cliente", "activos_jun", "tasa_retencion"]],
+               on=["ventana_dias", "tipo_cliente"], suffixes=("_todos", "_sin_alta_posterior")))
+por_segmento = consultar(["ventana_dias", "segmento"])
+por_tienda = consultar(["ventana_dias", "tienda_principal"], "tienda_principal IS NOT NULL")
+total = metrica.set_index("ventana_dias").tasa_retencion
+ic = por_tienda.apply(lambda r: wilson(r.retenidos, r.activos_jun), axis=1)
+por_tienda["ic95_inferior"], por_tienda["ic95_superior"] = ic.str[0], ic.str[1]
+por_tienda["tasa_cadena"] = por_tienda.ventana_dias.map(total)
+por_tienda["lectura"] = np.where(por_tienda.ic95_superior < por_tienda.tasa_cadena, "Bajo la cadena",
+                                 np.where(por_tienda.ic95_inferior > por_tienda.tasa_cadena, "Sobre la cadena",
+                                          "No concluyente"))
+
+h, n = por_tipo.query("ventana_dias == 90").set_index("tipo_cliente"), sens.query("ventana_dias == 90").set_index("tipo_cliente")
+# La brecha se calcula entre las tasas publicadas (redondeadas a una décima), como se informa.
+brecha_todos = round(h.loc["Nuevo 2025", "tasa_retencion"], 3) - round(h.loc["Base heredada", "tasa_retencion"], 3)
+brecha_k05 = (round(n.loc["Nuevo 2025", "tasa_retencion_sin_alta_posterior"], 3)
+              - round(n.loc["Base heredada", "tasa_retencion_sin_alta_posterior"], 3))
+registrar("K05", "métrica", "Sensibilidad de la antigüedad: retención por tipo de cliente con y sin los clientes con "
+          "alta posterior a su primera compra",
+          f"La brecha nuevos - heredada pasa de {dec(brecha_todos * 100)} a {dec(brecha_k05 * 100)} "
+          "puntos; la base heredada no cambia porque esos clientes tienen el alta en 2025",
+          int(alta_post.sum()), "La brecha por antigüedad no es concluyente; la conclusión de la P1 (repone) no cambia",
+          "medido")
+registrar("K06", "métrica", "Locales: una tasa se separa de la cadena solo si su intervalo de confianza al 95% "
+          "(Wilson) no contiene la tasa de la cadena",
+          "Con 33 a 46 clientes por local el intervalo es de unos ±13 a 16 puntos; una diferencia menor puede ser "
+          "azar", int((por_tienda.ventana_dias == 90).sum()),
+          "Si se usara la diferencia simple, se recomendarían locales cuya diferencia puede ser azar", "medido")
+
+# COMMAND ----------
+
+# MAGIC %md ## Evidencia complementaria
+
+# COMMAND ----------
+
+nv = vis[vis.tipo_cliente == "Nuevo 2025"].copy()
+nv["primera"] = nv.cliente_key.map(nv.groupby("cliente_key").fecha.min())
+nv["dias"] = (nv.fecha - nv.primera).dt.days
+segunda = nv[nv.dias > 0].groupby("cliente_key").dias.min()
+coh = nv.groupby("cliente_key").primera.min().to_frame()
+coh = coh[coh.primera.dt.month <= 9]  # solo meses de llegada con 90 días completos de observación
+coh["vuelve_90"] = coh.index.map(lambda k: segunda.get(k, np.inf) <= 90)
+coh["mes_llegada"] = coh.primera.dt.month
+recompra = (coh.groupby("mes_llegada").agg(clientes_nuevos=("vuelve_90", "size"), vuelven_90=("vuelve_90", "sum"))
+            .reset_index())
+recompra["tasa_recompra_90"] = recompra.vuelven_90 / recompra.clientes_nuevos
+
+vm = vis.merge(dim_fecha[["fecha_key", "mes"]], on="fecha_key", how="left")
+mensual = (vm.groupby(["mes", "tipo_cliente"]).agg(clientes=("cliente_key", "nunique"),
+                                                    venta_real_dic2025=("monto_boleta_real_dic2025", "sum"))
+           .reset_index())
+
+gaps = vis.sort_values(["cliente_key", "fecha"]).groupby("cliente_key").fecha.diff().dt.days.dropna()
+pausas = pd.DataFrame([{"pausas": len(gaps), "mediana_dias": gaps.median(), "p75_dias": gaps.quantile(.75),
+                        "pct_mayor_30": (gaps > 30).mean(), "pct_mayor_45": (gaps > 45).mean(),
+                        "pct_mayor_90": (gaps > 90).mean()}])
+
+# COMMAND ----------
+
+# MAGIC %md ## Caso de negocio en margen (pesos de diciembre de 2025)
+
+# COMMAND ----------
+
+base90 = cliente_ventana.query("ventana_dias == 90")
+perdidos = set(base90.query("perdido == 1").cliente_key)
+activos_jun = int(base90.activo_jun.sum())
+h1 = vis[vis.fecha <= C1]
+venta_perd = h1[h1.cliente_key.isin(perdidos)].monto_boleta_real_dic2025.sum()
+margen_perd = h1[h1.cliente_key.isin(perdidos)].margen_boleta_real_dic2025.sum()
+venta_h1 = h1.monto_boleta_real_dic2025.sum()
+por_10pp = round(0.10 * activos_jun)
+mensual_venta, mensual_margen = venta_perd / len(perdidos) / 6, margen_perd / len(perdidos) / 6
+caso = pd.DataFrame([
+    ("clientes_perdidos_90_dias", len(perdidos), "clientes"),
+    ("venta_1er_semestre_perdidos", round(venta_perd), "$ dic-2025"),
+    ("margen_1er_semestre_perdidos", round(margen_perd), "$ dic-2025"),
+    ("pct_venta_identificada_1er_semestre", venta_perd / venta_h1, "proporción"),
+    ("venta_mensual_por_cliente_perdido", round(mensual_venta), "$ dic-2025"),
+    ("margen_mensual_por_cliente_perdido", round(mensual_margen), "$ dic-2025"),
+    ("clientes_por_10_puntos_de_retencion", por_10pp, "clientes"),
+    ("venta_anual_por_10_puntos", round(por_10pp * mensual_venta * 12), "$ dic-2025"),
+    ("margen_anual_por_10_puntos", round(por_10pp * mensual_margen * 12), "$ dic-2025"),
+], columns=["concepto", "valor", "unidad"])
+print(caso)
+
+# COMMAND ----------
+
+# MAGIC %md ## Campaña de contacto: frecuencia, costo y clientes que la pagan
+# MAGIC En cada campaña se contacta a quien cumplió 34 días sin comprar desde la campaña anterior y aún no vuelve.
+# MAGIC Se simulan tres frecuencias sobre las visitas de abril a diciembre (desde abril todo cliente tiene historia
+# MAGIC suficiente para medir sus días sin comprar) y se anualiza el promedio por campaña. Que el cliente vuelva solo
+# MAGIC se mide en las campañas con 90 días de observación posterior.
+# MAGIC
+# MAGIC Costo anual = preparación (campañas x horas x costo por hora) + mensajes (contactos x costo por contacto)
+# MAGIC + cupones canjeados (contactos x tasa de canje x cupón promedio con tope).
+
+# COMMAND ----------
+
+INICIO_SIMULACION = pd.Timestamp("2025-04-01")
+
+
+def miles(n):
+    return f"{n:,.0f}".replace(",", ".")
+
+
+margen_cliente = round(mensual_margen * 12)
+cupon_medio = float(np.minimum(CUPON * vis.monto_boleta_real_dic2025, TOPE_CUPON).mean())
+vf = vis[["cliente_key", "fecha"]].sort_values("fecha")
+
+
+def simular(codigo):
+    cortes = pd.date_range(INICIO_SIMULACION, C2, freq=codigo)
+    intervalo = (cortes[1] - cortes[0]).days
+    filas = []
+    for i, corte in enumerate(cortes):
+        desde = (corte - cortes[i - 1]).days if i else intervalo
+        ultima = vf[vf.fecha < corte].groupby("cliente_key").fecha.max()
+        dias = (corte - ultima).dt.days
+        elegidos = dias[(dias >= DIA_CONTACTO) & (dias < DIA_CONTACTO + desde)]
+        vuelta = vf[vf.fecha >= corte].groupby("cliente_key").fecha.min().reindex(elegidos.index)
+        filas.append(pd.DataFrame({"corte": corte, "cliente_key": elegidos.index, "dias_sin_comprar": elegidos.values,
+                                   "dias_hasta_volver": (vuelta - corte).dt.days.values}))
+    return cortes, pd.concat(filas, ignore_index=True)
+
+
+filas_frecuencia, contactos_simulados = [], {}
+for orden, (frecuencia, (codigo, por_anio)) in enumerate(FRECUENCIAS.items(), start=1):
+    cortes, ct = simular(codigo)
+    contactos_simulados[frecuencia] = ct
+    observables = ct[ct.corte + pd.Timedelta(days=90) <= C2]
+    por_campana = len(ct) / len(cortes)
+    al_anio = round(por_campana * por_anio)
+    preparacion = por_anio * HORAS_PREPARACION * COSTO_HORA
+    mensajes = al_anio * COSTO_CONTACTO
+    cupones = al_anio * TASA_CANJE * cupon_medio
+    total = preparacion + mensajes + cupones
+    filas_frecuencia.append({
+        "frecuencia": frecuencia, "orden": orden, "recomendada": int(frecuencia == FRECUENCIA_CAMPANA),
+        "campanas_al_anio": por_anio, "campanas_simuladas": len(cortes),
+        "contactos_por_campana": round(por_campana, 1), "contactos_al_anio": al_anio,
+        "dia_contacto_min": int(ct.dias_sin_comprar.min()), "dia_contacto_mediana": int(ct.dias_sin_comprar.median()),
+        "dia_contacto_max": int(ct.dias_sin_comprar.max()),
+        "pct_vuelven_solos_90": round(float((observables.dias_hasta_volver <= 90).mean()), 4),
+        "horas_preparacion": HORAS_PREPARACION, "costo_hora": COSTO_HORA, "costo_contacto": COSTO_CONTACTO,
+        "cupon": CUPON, "tope_cupon": TOPE_CUPON, "tasa_canje": TASA_CANJE, "cupon_medio": round(cupon_medio, 4),
+        "costo_preparacion_anual": round(preparacion), "costo_mensajes_anual": round(mensajes),
+        "costo_cupones_anual": round(cupones), "costo_anual": round(total), "costo_por_campana": round(total / por_anio),
+        "margen_anual_por_cliente_reactivado": margen_cliente,
+        "margen_anual_por_10_puntos": round(por_10pp * mensual_margen * 12),
+        "clientes_meta_10_puntos": int(por_10pp),
+        "clientes_para_pagar_al_anio": int(np.ceil(total / margen_cliente)),
+        "clientes_para_pagar_por_campana": int(np.ceil(total / por_anio / margen_cliente)),
+    })
+contacto = pd.DataFrame(filas_frecuencia)
+contacto["se_paga_antes_de_la_meta"] = (contacto.clientes_para_pagar_al_anio <= contacto.clientes_meta_10_puntos
+                                        ).astype(int)
+print(contacto.set_index("frecuencia").T)
+elegida = contacto.set_index("frecuencia").loc[FRECUENCIA_CAMPANA]
+
+# COMMAND ----------
+
+# MAGIC %md ## Reglas de la métrica (bitácora)
+
+# COMMAND ----------
+
+res = metrica.set_index("ventana_dias")
+misma = res.loc[90, "conclusion"] == res.loc[180, "conclusion"]
+registrar("K01", "métrica", "Ventana de actividad de 90 días (alternativa 180; referencia 30)",
+          f"Mediana entre compras {gaps.median():.0f} días; {pct((gaps > 90).mean())} de las pausas superan 90 días "
+          f"y {pct((gaps > 30).mean())} superan 30", int(res.loc[90, "activos_jun"]),
+          f"Con 180 días la retención sube a {pct(res.loc[180, 'tasa_retencion'])}; la conclusión "
+          f"{'se mantiene' if misma else 'cambia'}", "verbalizado (creencia de 30 días) y medido")
+registrar("K02", "métrica", "Cortes al 30-jun y al 31-dic para que las ventanas no se traslapen",
+          "El 30-jun es el primer cierre de mes con 180 días de historia y el 31-dic es el último dato; que coincidan "
+          "con el fin de cada semestre no es un criterio", 2,
+          "Diciembre es temporada alta: clientes que solo compran en fiestas pueden aparecer como activos", "inferido")
+vt = vis.merge(dim_fecha[["fecha_key", "trimestre"]], on="fecha_key")
+t2, t4 = set(vt[vt.trimestre == "T2"].cliente_key), set(vt[vt.trimestre == "T4"].cliente_key)
+ret_trim, rep_trim = len(t2 & t4) / len(t2), len(t4 - t2) / len(t4)
+registrar("K04", "métrica", "Ventana móvil de 90 días y no trimestre calendario (prueba de robustez: T2 frente a T4)",
+          f"Con trimestres calendario (dim_fecha.trimestre) la retención es {pct(ret_trim)} y la reposición "
+          f"{pct(rep_trim)}", len(t2),
+          f"Ninguno: la retención cambia {dec(abs(ret_trim - res.loc[90, 'tasa_retencion']) * 100)} puntos y la "
+          f"conclusión ({'repone' if rep_trim > UMBRAL_LECTURA else 'retiene'}) se mantiene", "medido")
+registrar("K07", "métrica", f"Costo del contacto = preparación por campaña ({HORAS_PREPARACION} h x "
+          f"${miles(COSTO_HORA)}) + mensaje (${COSTO_CONTACTO} por cliente) + cupón canjeado ({CUPON:.0%} de la "
+          f"compra, tope ${miles(TOPE_CUPON)}; canje {TASA_CANJE:.0%})",
+          "Cifras de Marketing (respuesta del 17-nov-2026): mensaje entre $80 y $120, preparación de 4 h por campaña, "
+          "cupón máximo de 10% con tope y canje entre 10% y 15%. Se usa el canje alto y se cobra el cupón también a "
+          "quien habría vuelto solo, para no subestimar el costo",
+          int(elegida.contactos_al_anio),
+          f"Con canje de 10% o mensaje de $80 el costo baja; el tablero permite cambiar ambos. El valor de un cliente "
+          f"reactivado supone un año de compras (${miles(margen_cliente)}); si fuera medio año, se necesitaría el "
+          "doble de clientes", "contraparte (Marketing) y supuesto declarado")
+f_txt = "; ".join(f"{r.frecuencia.lower()} ${r.costo_anual / 1e6:.2f} MM y {r.clientes_para_pagar_al_anio} clientes"
+                  .replace(".", ",") for r in contacto.itertuples())
+registrar("K08", "métrica", f"Campaña {FRECUENCIA_CAMPANA.lower()}: el día 1 de cada mes se contacta a quien cumplió "
+          f"{DIA_CONTACTO} días sin comprar desde la campaña anterior (contacto entre los días "
+          f"{int(elegida.dia_contacto_min)} y {int(elegida.dia_contacto_max)}, mediana {int(elegida.dia_contacto_mediana)})",
+          f"La preparación cuesta lo mismo por campaña, así que la frecuencia decide el costo anual ({f_txt}). Solo la "
+          f"mensual se paga antes de la meta ({int(por_10pp)} clientes) y es el ritmo con que Marketing ya trabaja",
+          int(elegida.campanas_al_anio),
+          "En la mitad de los casos el contacto llega después del día 45 sin comprar. Si la preparación se "
+          "automatiza (la cadena entrega la lista de clientes), una frecuencia mayor acerca el contacto al día 34",
+          "contraparte (Marketing), simulado con las visitas de 2025")
+registrar("K03", "métrica", "Tienda principal = tienda con más visitas del cliente en la ventana de junio",
+          "La mayoría de los clientes compra en más de un local; se asigna uno para cortar la retención",
+          int(res.loc[90, "activos_jun"]), "Un cliente repartido entre locales queda asignado solo a uno", "inferido")
+
+# COMMAND ----------
+
+# MAGIC %md ## Linaje por campo: del origen a la pantalla
+
+# COMMAND ----------
+
+KPI, CASCADA, LOCALES, VALE = ("Cifras clave", "Base activa jun/dic", "Retención por local y detalle",
+                               "Vale / cuesta")
+LINAJE = [
+    ("POS · boletas.fecha", "B02 (5 formatos de fecha), B03 (solo 2025)", "plata.boletas.fecha",
+     "fact_venta_linea.fecha_key → dim_fecha.fecha",
+     "Cliente activo: visita en los W días previos al corte (activo_jun, activo_dic)",
+     "tasa_retencion, tasa_reposicion", f"{KPI}; {CASCADA}; {LOCALES}; Decisiones; {VALE} (días sin comprar)"),
+    ("POS · boletas.boleta_id", "B01 (duplicados exactos)", "plata.boletas.boleta_id",
+     "fact_venta_linea.boleta_id", "Una boleta = una visita", "todas", "Todas"),
+    ("POS · boletas.cliente_id", "B06 (anónimas fuera de la retención)", "plata.boletas.cliente_id",
+     "fact_venta_linea.cliente_key → dim_cliente", "Unidad de conteo: el cliente",
+     "todas", "Todas; Cobertura"),
+    ("POS · boleta_detalle.monto_linea", "D04 (devoluciones), D05 (no se corrige lo cobrado)",
+     "plata.detalle.monto_linea", "fact_venta_linea.monto_linea", "Visita solo si el monto neto es > 0 (B07)",
+     "tasa_retencion, tasa_reposicion", f"{KPI}; {CASCADA}"),
+    ("POS · boletas.tienda_id", "T00 (región de La Florida), B05 (región desde la tienda)",
+     "plata.boletas.tienda_id", "fact_venta_linea.tienda_key → dim_tienda.tienda",
+     "Tienda principal: local con más visitas en la ventana de junio (K03)", "tasa_retencion por local (K06)",
+     LOCALES),
+    ("POS · clientes.fecha_alta", "Fecha interpretada en dos formatos; no se corrige (M02)",
+     "plata.clientes.fecha_alta", "dim_cliente.tipo_cliente (M01)",
+     "Tipo de cliente y marca de alta posterior a la primera compra (K05)", "tasa_retencion por tipo",
+     "Filtro de tipo de cliente; Sensibilidad de la antigüedad"),
+    ("Maestro · costo_unitario", "P03 (texto a número), P04 (SKU repetido)", "plata.productos.costo_unitario",
+     "fact_venta_linea.costo_linea, margen_linea (M08)", "Margen de los clientes perdidos y por recuperar",
+     "margen_anual_por_10_puntos, margen por cliente reactivado", VALE),
+    ("POS · boleta_detalle.cantidad", "D04 (cantidad negativa = devolución)", "plata.detalle.cantidad",
+     "fact_venta_linea.cantidad → costo_linea", "Costo de la línea = cantidad × costo unitario",
+     "margen_anual_por_10_puntos", VALE),
+    ("API mindicador · IPC mensual", "I01 (índice encadenado); respaldo fechado si la API falla",
+     "plata.ipc_mensual.factor_a_pesos_dic2025", "dim_fecha.factor_a_pesos_dic2025",
+     "Montos y margen en pesos de diciembre de 2025", "margen_anual_por_10_puntos", f"{VALE}; pie (origen del IPC)"),
+]
+LINAJE.append(("Respuesta de Marketing (17-nov) · costos de la campaña", "K07 (costos), K08 (frecuencia mensual)",
+               "—", "oro.contacto_campanas", "Costo anual y por campaña; clientes reactivados que la pagan",
+               "costo_anual, clientes_para_pagar_por_campana", f"{VALE}; Decisiones (frecuencia de la campaña)"))
+linaje = pd.DataFrame(LINAJE, columns=["campo_origen", "regla_limpieza", "campo_plata", "campo_modelo",
+                                       "uso_en_la_metrica", "medida", "pantalla"])
+linaje.insert(0, "orden", range(1, len(linaje) + 1))
+
+# COMMAND ----------
+
+# MAGIC %md ## Pruebas de la métrica
+
+# COMMAND ----------
+
+pruebas.verificar("S-MET-01", "Métrica", "Tasas entre 0 y 1",
+                  metrica.tasa_retencion.between(0, 1).all() and metrica.tasa_reposicion.between(0, 1).all())
+cuadra = (metrica.activos_dic == metrica.retenidos + metrica.ganados).all() and \
+         (metrica.activos_jun == metrica.retenidos + metrica.perdidos).all() and \
+         (metrica.ganados == metrica.ganados_nuevos + metrica.ganados_reactivados).all()
+pruebas.verificar("S-MET-02", "Métrica", "La cascada cierra: jun = retenidos + perdidos; dic = retenidos + ganados",
+                  cuadra)
+pruebas.verificar("S-MET-03", "Métrica", "Cada cliente aparece una vez por ventana",
+                  not cliente_ventana.duplicated(["cliente_key", "ventana_dias"]).any())
+pruebas.verificar("S-MET-04", "Métrica", "El corte por local suma el total de activos al 30-jun",
+                  (por_tienda.groupby("ventana_dias").activos_jun.sum() == res.activos_jun).all())
+dif = max(abs(res.loc[w, "tasa_retencion"] - r) + abs(res.loc[w, "tasa_reposicion"] - p)
+          for w, (r, p) in CIFRAS_PUBLICADAS.items())
+pruebas.verificar("S-MET-05", "Métrica", "La cadena reproduce las cifras publicadas en el informe (±0,1 punto)",
+                  dif < 0.001, severidad="avisa",
+                  accion="Seguir; el informe debe explicar el cambio en el registro de mejora")
+cs = contacto.set_index("frecuencia")
+pruebas.verificar("S-CON-01", "Campaña de contacto", "Nadie se contacta antes del día 34 sin comprar",
+                  (cs.dia_contacto_min >= DIA_CONTACTO).all())
+pruebas.verificar("S-CON-02", "Campaña de contacto",
+                  "Menos campañas implican más contactos por campaña (semanal < quincenal < mensual)",
+                  cs.loc["Semanal", "contactos_por_campana"] < cs.loc["Quincenal", "contactos_por_campana"]
+                  < cs.loc["Mensual", "contactos_por_campana"])
+pruebas.verificar("S-CON-03", "Campaña de contacto", "El costo anual es la suma de preparación, mensajes y cupones",
+                  (abs(cs.costo_preparacion_anual + cs.costo_mensajes_anual + cs.costo_cupones_anual - cs.costo_anual)
+                   <= 2).all())
+pruebas.verificar("S-CON-04", "Campaña de contacto", "El cupón promedio no supera el tope de $5.000",
+                  cupon_medio <= TOPE_CUPON)
+pruebas.verificar("S-CON-05", "Campaña de contacto", "Cada cliente se contacta a lo más una vez por campaña",
+                  not any(c.duplicated(["corte", "cliente_key"]).any() for c in contactos_simulados.values()))
+
+# COMMAND ----------
+
+# MAGIC %md ## Publicación
+
+# COMMAND ----------
+
+pruebas.cerrar()
+for tabla, df in {"metrica_retencion": metrica, "retencion_por_tipo": por_tipo, "sensibilidad_k05": sens,
+                  "retencion_por_segmento": por_segmento, "retencion_por_tienda": por_tienda,
+                  "evidencia_recompra_nuevos": recompra, "evidencia_clientes_mes": mensual,
+                  "pausas_entre_compras": pausas, "caso_negocio": caso, "contacto_campanas": contacto}.items():
+    escribir_pandas(df, "oro", tabla)
+if EN_DATABRICKS:
+    spark.sql(f"DROP TABLE IF EXISTS {nombre_tabla('oro', 'contacto_34_45')}")
+else:
+    shutil.rmtree(ruta_local("oro", "contacto_34_45"), ignore_errors=True)
+if os.path.exists(os.path.join(DIR_SALIDAS, "contacto_34_45.csv")):
+    os.remove(os.path.join(DIR_SALIDAS, "contacto_34_45.csv"))
+bit.guardar()
+escribir_pandas(linaje, "control", "linaje_metrica")
+
+bitacora = pd.concat([a_pandas("control", f"bitacora_{c}") for c in ("plata", "oro", "semantica")], ignore_index=True)
+escribir_pandas(bitacora, "control", "bitacora_supuestos")
+todas = a_pandas("control", "pruebas_resultados")
+ultima = todas[todas.id_corrida == ID_CORRIDA]
+carga = a_pandas("control", "bitacora_carga")
+esta_carga = carga[carga.id_corrida == ID_CORRIDA]
+origen_ipc = esta_carga.origen_ipc.iloc[0] if len(esta_carga) else "?"
+fecha_respaldo = (esta_carga.fecha_respaldo_ipc.iloc[0]
+                  if len(esta_carga) and "fecha_respaldo_ipc" in esta_carga else "sin fecha")
+estado = pd.DataFrame([{
+    "id_corrida": ID_CORRIDA, "fecha_hora": ahora(), "origen_ipc": origen_ipc, "fecha_respaldo_ipc": fecha_respaldo,
+    "pruebas": len(ultima), "pruebas_ok": int((ultima.resultado == "pasó").sum()),
+    "avisos": int(((ultima.resultado == "falló") & (ultima.severidad == "avisa")).sum()),
+    "pct_pruebas_ok": (ultima.resultado == "pasó").mean(),
+    "cobertura_boletas": n_usadas / n_origen,
+    "fuente": "POS, maestro de productos, campañas y IPC (mindicador.cl) de Multitienda del Sur, 2025",
+    "dueno_dato": DUENO_DATOS, "dueno_tablero": DUENO_TABLERO, "dueno_definicion": DUENO_DEFINICION,
+    "regla_de_lectura": REGLA_LECTURA}])
+escribir_pandas(estado, "control", "estado_corrida", modo="append")
+
+guardar_salida_csv(metrica.drop(columns="regla_de_lectura"), "metrica_retencion.csv", index=False)
+guardar_salida_csv(por_tipo, "retencion_por_tipo.csv", index=False)
+guardar_salida_csv(sens, "sensibilidad_k05.csv", index=False)
+guardar_salida_csv(por_tienda, "retencion_por_tienda.csv", index=False)
+guardar_salida_csv(por_segmento, "retencion_por_segmento.csv", index=False)
+guardar_salida_csv(recompra, "recompra_90_nuevos_por_mes.csv", index=False)
+guardar_salida_csv(mensual, "clientes_y_venta_mensual_por_tipo.csv", index=False)
+guardar_salida_csv(caso, "caso_de_negocio.csv", index=False)
+guardar_salida_csv(contacto, "contacto_campanas.csv", index=False)
+guardar_salida_csv(cobertura, "cobertura.csv", index=False)
+guardar_salida_csv(pausas, "pausas_entre_compras.csv", index=False)
+guardar_salida_csv(bitacora, "bitacora_supuestos.csv", index=False)
+guardar_salida_csv(ultima, "pruebas_ultima_corrida.csv", index=False)
+guardar_salida_csv(a_pandas("oro", "diccionario_datos"), "diccionario_datos.csv", index=False)
+guardar_salida_csv(linaje, "linaje_metrica.csv", index=False)
+print(f"Corrida {ID_CORRIDA} publicada: {estado.pruebas_ok.iloc[0]}/{estado.pruebas.iloc[0]} pruebas en verde, "
+      f"IPC desde {origen_ipc}.")

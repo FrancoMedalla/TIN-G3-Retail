@@ -1,0 +1,3775 @@
+{
+  "datasets": [
+    {
+      "name": "opciones_ventana",
+      "displayName": "Opciones de ventana",
+      "queryLines": [
+        "SELECT explode(array('30', '90', '180')) AS ventana\n"
+      ]
+    },
+    {
+      "name": "opciones_tipo",
+      "displayName": "Opciones de tipo de cliente",
+      "queryLines": [
+        "SELECT explode(array('Todos', 'Base heredada', 'Nuevo 2025')) AS tipo_cliente\n"
+      ]
+    },
+    {
+      "name": "opciones_costo",
+      "displayName": "Opciones de costo por mensaje",
+      "queryLines": [
+        "SELECT explode(array('80', '100', '120')) AS costo_contacto\n"
+      ]
+    },
+    {
+      "name": "opciones_canje",
+      "displayName": "Opciones de tasa de canje",
+      "queryLines": [
+        "SELECT explode(array('10', '12,5', '15')) AS canje\n"
+      ]
+    },
+    {
+      "name": "opciones_frecuencia",
+      "displayName": "Opciones de frecuencia de campaña",
+      "queryLines": [
+        "SELECT explode(array('Mensual', 'Quincenal', 'Semanal')) AS frecuencia\n"
+      ]
+    },
+    {
+      "name": "kpi",
+      "displayName": "Cifras clave",
+      "queryLines": [
+        "WITH m AS (\n",
+        "  SELECT MEASURE(tasa_retencion) AS tasa_retencion, MEASURE(tasa_reposicion) AS tasa_reposicion, MEASURE(activos_jun) AS activos_jun, MEASURE(retenidos) AS retenidos, MEASURE(perdidos) AS perdidos, MEASURE(ganados) AS ganados, MEASURE(ganados_nuevos) AS ganados_nuevos, MEASURE(ganados_reactivados) AS ganados_reactivados, MEASURE(activos_dic) AS activos_dic\n",
+        "  FROM workspace.oro.mv_retencion\n",
+        "  WHERE ventana_dias = CAST(:ventana AS INT) AND (:tipo = 'Todos' OR tipo_cliente = :tipo)\n",
+        "),\n",
+        "cob AS (\n",
+        "  SELECT MAX(CASE WHEN paso = 'Boletas en origen' THEN boletas END) AS origen,\n",
+        "         MAX(CASE WHEN paso LIKE '= Visitas%' THEN boletas END) AS usadas\n",
+        "  FROM workspace.control.cobertura\n",
+        ")\n",
+        "SELECT m.*,\n",
+        "  concat(translate(format_number(tasa_retencion * 100, 1), ',.', '.,'), '%') AS retencion_texto,\n",
+        "  concat(translate(format_number(tasa_reposicion * 100, 1), ',.', '.,'), '%') AS reposicion_texto,\n",
+        "  CASE WHEN tasa_reposicion > 0.5 THEN 'REPONE' ELSE 'RETIENE' END AS conclusion_texto,\n",
+        "  concat(CAST(retenidos AS STRING), ' de ', CAST(activos_jun AS STRING), ' siguen activos · meta: ',\n",
+        "         translate(format_number((tasa_retencion + 0.10) * 100, 1), ',.', '.,'), '%') AS comparacion_retencion,\n",
+        "  concat(CAST(ganados AS STRING), ' de ', CAST(activos_dic AS STRING), ' son nuevos o volvieron · umbral: 50%')\n",
+        "    AS comparacion_reposicion,\n",
+        "  concat(translate(format_number(usadas / origen * 100, 1), ',.', '.,'), '% de las boletas (', translate(format_number(usadas, 0), ',.', '.,'), ' de ', translate(format_number(origen, 0), ',.', '.,'), ')')\n",
+        "    AS cobertura_texto\n",
+        "FROM m CROSS JOIN cob\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "ventana",
+          "keyword": "ventana",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "90"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "tipo",
+          "keyword": "tipo",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Todos"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "cascada",
+      "displayName": "Base activa junio y diciembre",
+      "queryLines": [
+        "WITH m AS (\n",
+        "  SELECT MEASURE(retenidos) AS r, MEASURE(perdidos) AS p, MEASURE(ganados_nuevos) AS n,\n",
+        "         MEASURE(ganados_reactivados) AS a\n",
+        "  FROM workspace.oro.mv_retencion\n",
+        "  WHERE ventana_dias = CAST(:ventana AS INT) AND (:tipo = 'Todos' OR tipo_cliente = :tipo)\n",
+        ")\n",
+        "SELECT 'Activos al 30-jun' AS corte, 'Siguen activos (retenidos)' AS estado, r AS clientes FROM m\n",
+        "UNION ALL SELECT 'Activos al 30-jun', 'Perdidos', p FROM m\n",
+        "UNION ALL SELECT 'Activos al 31-dic', 'Siguen activos (retenidos)', r FROM m\n",
+        "UNION ALL SELECT 'Activos al 31-dic', 'Reactivados', a FROM m\n",
+        "UNION ALL SELECT 'Activos al 31-dic', 'Nuevos', n FROM m\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "ventana",
+          "keyword": "ventana",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "90"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "tipo",
+          "keyword": "tipo",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Todos"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "tiendas",
+      "displayName": "Retención por local",
+      "queryLines": [
+        "WITH t AS (\n",
+        "  SELECT tienda_principal AS tienda, MEASURE(retenidos) AS retenidos, MEASURE(activos_jun) AS activos_jun\n",
+        "  FROM workspace.oro.mv_retencion\n",
+        "  WHERE ventana_dias = CAST(:ventana AS INT) AND (:tipo = 'Todos' OR tipo_cliente = :tipo) AND tienda_principal IS NOT NULL\n",
+        "  GROUP BY tienda_principal\n",
+        "),\n",
+        "c AS (\n",
+        "  SELECT MEASURE(tasa_retencion) AS tasa_cadena FROM workspace.oro.mv_retencion WHERE ventana_dias = CAST(:ventana AS INT) AND (:tipo = 'Todos' OR tipo_cliente = :tipo)\n",
+        "),\n",
+        "w AS (\n",
+        "  SELECT tienda, activos_jun, retenidos, retenidos / activos_jun AS tasa,\n",
+        "    ((retenidos / activos_jun) + 1.96 * 1.96 / (2 * activos_jun)\n",
+        "      - 1.96 * sqrt((retenidos / activos_jun) * (1 - retenidos / activos_jun) / activos_jun\n",
+        "                    + 1.96 * 1.96 / (4 * activos_jun * activos_jun)))\n",
+        "      / (1 + 1.96 * 1.96 / activos_jun) AS ic_inferior,\n",
+        "    ((retenidos / activos_jun) + 1.96 * 1.96 / (2 * activos_jun)\n",
+        "      + 1.96 * sqrt((retenidos / activos_jun) * (1 - retenidos / activos_jun) / activos_jun\n",
+        "                    + 1.96 * 1.96 / (4 * activos_jun * activos_jun)))\n",
+        "      / (1 + 1.96 * 1.96 / activos_jun) AS ic_superior\n",
+        "  FROM t\n",
+        ")\n",
+        "SELECT w.tienda, w.activos_jun, w.retenidos, round(w.tasa, 3) AS tasa,\n",
+        "  concat(translate(format_number(w.tasa * 100, 1), ',.', '.,'), '%') AS tasa_texto, w.ic_inferior, w.ic_superior, c.tasa_cadena,\n",
+        "  CASE WHEN w.ic_superior < c.tasa_cadena THEN 'Bajo la cadena'\n",
+        "       WHEN w.ic_inferior > c.tasa_cadena THEN 'Sobre la cadena'\n",
+        "       ELSE 'No concluyente' END AS lectura,\n",
+        "  concat(CAST(round(w.ic_inferior * 100) AS INT), '% a ', CAST(round(w.ic_superior * 100) AS INT), '%')\n",
+        "    AS intervalo_95,\n",
+        "  concat(translate(format_number(c.tasa_cadena * 100, 1), ',.', '.,'), '%') AS tasa_cadena_texto\n",
+        "FROM w CROSS JOIN c\n",
+        "ORDER BY w.tienda\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "ventana",
+          "keyword": "ventana",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "90"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "tipo",
+          "keyword": "tipo",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Todos"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "vale_cuesta",
+      "displayName": "Valor y costo de la campaña de contacto",
+      "queryLines": [
+        "WITH x AS (\n",
+        "  SELECT c.*, CAST(:costo_contacto AS DOUBLE) AS costo, CAST(replace(:canje, ',', '.') AS DOUBLE) / 100 AS canje\n",
+        "  FROM workspace.oro.contacto_campanas c\n",
+        "  WHERE frecuencia = :frecuencia\n",
+        "),\n",
+        "y AS (\n",
+        "  SELECT x.*,\n",
+        "    costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio AS costo_total,\n",
+        "    CEIL((costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio)\n",
+        "         / campanas_al_anio / margen_anual_por_cliente_reactivado) AS por_campana,\n",
+        "    CEIL((costo_preparacion_anual + contactos_al_anio * costo + contactos_al_anio * canje * cupon_medio)\n",
+        "         / margen_anual_por_cliente_reactivado) AS por_anio\n",
+        "  FROM x\n",
+        ")\n",
+        "SELECT\n",
+        "  concat('$', translate(format_number(margen_anual_por_10_puntos / 1000000, 2), ',.', '.,'), ' MM') AS vale_texto,\n",
+        "  concat('$', translate(format_number(costo_total / 1000000, 2), ',.', '.,'), ' MM') AS cuesta_texto,\n",
+        "  concat(CAST(por_campana AS STRING), ' de ', translate(format_number(contactos_por_campana, 0), ',.', '.,'), ' contactados') AS equilibrio_texto,\n",
+        "  concat(CAST(por_campana AS STRING), ' clientes') AS equilibrio_clientes,\n",
+        "  concat('de ', translate(format_number(contactos_por_campana, 0), ',.', '.,'), ' contactados en cada campaña ', lower(frecuencia))\n",
+        "    AS equilibrio_detalle,\n",
+        "  concat('$', translate(format_number(costo_total / campanas_al_anio, 0), ',.', '.,')) AS costo_campana_texto,\n",
+        "  translate(format_number(contactos_por_campana, 0), ',.', '.,') AS contactos_texto,\n",
+        "  concat(CAST(dia_contacto_min AS STRING), ' a ', CAST(dia_contacto_max AS STRING), ' (mediana ',\n",
+        "         CAST(dia_contacto_mediana AS STRING), ')') AS dia_texto,\n",
+        "  concat(translate(format_number(pct_vuelven_solos_90 * 100, 0), ',.', '.,'), ' de cada 100') AS vuelven_texto,\n",
+        "  concat('$', translate(format_number(margen_anual_por_cliente_reactivado, 0), ',.', '.,')) AS margen_cliente_texto,\n",
+        "  concat(CAST(por_anio AS STRING), ' (meta: ', CAST(clientes_meta_10_puntos AS STRING), ')') AS clientes_anio_texto\n",
+        "FROM y\n"
+      ],
+      "parameters": [
+        {
+          "displayName": "costo_contacto",
+          "keyword": "costo_contacto",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "canje",
+          "keyword": "canje",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "15"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "displayName": "frecuencia",
+          "keyword": "frecuencia",
+          "dataType": "STRING",
+          "defaultSelection": {
+            "values": {
+              "dataType": "STRING",
+              "values": [
+                {
+                  "value": "Mensual"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "frecuencias",
+      "displayName": "Costo de la campaña según su frecuencia",
+      "queryLines": [
+        "SELECT frecuencia, orden,\n",
+        "  CAST(campanas_al_anio AS STRING) AS campanas,\n",
+        "  translate(format_number(contactos_al_anio, 0), ',.', '.,') AS contactos,\n",
+        "  concat(CAST(dia_contacto_min AS STRING), ' a ', CAST(dia_contacto_max AS STRING), ' (mediana ',\n",
+        "         CAST(dia_contacto_mediana AS STRING), ')') AS dias,\n",
+        "  concat('$', translate(format_number(costo_preparacion_anual / 1000000, 2), ',.', '.,'), ' MM') AS preparacion,\n",
+        "  concat('$', translate(format_number(costo_mensajes_anual / 1000000, 2), ',.', '.,'), ' MM') AS mensajes,\n",
+        "  concat('$', translate(format_number(costo_cupones_anual / 1000000, 2), ',.', '.,'), ' MM') AS cupones,\n",
+        "  concat('$', translate(format_number(costo_anual / 1000000, 2), ',.', '.,'), ' MM') AS total,\n",
+        "  concat(CAST(clientes_para_pagar_al_anio AS STRING), ' al año (', CAST(clientes_para_pagar_por_campana AS STRING),\n",
+        "         ' por campaña)') AS clientes,\n",
+        "  CASE WHEN se_paga_antes_de_la_meta = 1 THEN 'Sí' ELSE 'No' END AS antes_de_la_meta\n",
+        "FROM workspace.oro.contacto_campanas\n",
+        "ORDER BY orden\n"
+      ]
+    },
+    {
+      "name": "frecuencias_costos",
+      "displayName": "Componentes del costo por frecuencia",
+      "queryLines": [
+        "SELECT frecuencia, orden, 'Preparación (4 h por campaña)' AS componente, round(costo_preparacion_anual / 1000000, 2)\n",
+        "  AS millones FROM workspace.oro.contacto_campanas\n",
+        "UNION ALL SELECT frecuencia, orden, 'Cupones canjeados', round(costo_cupones_anual / 1000000, 2)\n",
+        "  FROM workspace.oro.contacto_campanas\n",
+        "UNION ALL SELECT frecuencia, orden, 'Mensajes', round(costo_mensajes_anual / 1000000, 2)\n",
+        "  FROM workspace.oro.contacto_campanas\n"
+      ]
+    },
+    {
+      "name": "estado",
+      "displayName": "Estado de la última corrida",
+      "queryLines": [
+        "SELECT concat('Fuente: POS, maestro, campañas e IPC (mindicador.cl), 2025 · Dueño del tablero: ',\n",
+        "              coalesce(dueno_tablero, 'Marketing'), ' · Datos: ', dueno_dato, ' · Actualizado: ',\n",
+        "              substr(fecha_hora, 1, 16), ' · Pruebas: ', CAST(pruebas_ok AS STRING),\n",
+        "              ' de ', CAST(pruebas AS STRING), ' · IPC: ', CASE WHEN origen_ipc = 'api' THEN 'API de mindicador.cl' WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'respaldo sin fecha' ELSE concat('respaldo del ', fecha_respaldo_ipc) END) AS pie\n",
+        "FROM workspace.control.estado_corrida\n",
+        "ORDER BY fecha_hora DESC\n",
+        "LIMIT 1\n"
+      ]
+    },
+    {
+      "name": "ventanas",
+      "displayName": "Retención y reposición por ventana",
+      "queryLines": [
+        "WITH m AS (\n",
+        "  SELECT ventana_dias, MEASURE(tasa_retencion) AS r, MEASURE(tasa_reposicion) AS p\n",
+        "  FROM workspace.oro.mv_retencion\n",
+        "  GROUP BY ventana_dias\n",
+        "),\n",
+        "e AS (\n",
+        "  SELECT ventana_dias, r, p,\n",
+        "    concat(CAST(ventana_dias AS STRING), ' días',\n",
+        "           CASE ventana_dias WHEN 90 THEN ' (definición)' WHEN 180 THEN ' (alternativa)'\n",
+        "                ELSE ' (referencia de la contraparte)' END) AS ventana\n",
+        "  FROM m\n",
+        ")\n",
+        "SELECT ventana, ventana_dias, 'Tasa de retención semestral' AS medida, round(r, 3) AS valor FROM e\n",
+        "UNION ALL SELECT ventana, ventana_dias, 'Tasa de reposición', round(p, 3) FROM e\n"
+      ]
+    },
+    {
+      "name": "ventanas_tabla",
+      "displayName": "Detalle por ventana",
+      "queryLines": [
+        "SELECT\n",
+        "  concat(CAST(ventana_dias AS STRING), ' días') AS ventana,\n",
+        "  concat(translate(format_number(MEASURE(tasa_retencion) * 100, 1), ',.', '.,'), '% (', CAST(MEASURE(retenidos) AS STRING), ' de ',\n",
+        "         CAST(MEASURE(activos_jun) AS STRING), ')') AS retencion,\n",
+        "  concat(translate(format_number(MEASURE(tasa_reposicion) * 100, 1), ',.', '.,'), '% (', CAST(MEASURE(ganados) AS STRING), ' de ',\n",
+        "         CAST(MEASURE(activos_dic) AS STRING), ')') AS reposicion,\n",
+        "  CASE WHEN MEASURE(tasa_reposicion) > 0.5 THEN 'Repone' ELSE 'Retiene' END AS lectura\n",
+        "FROM workspace.oro.mv_retencion\n",
+        "GROUP BY ventana_dias\n",
+        "ORDER BY ventana_dias\n"
+      ]
+    },
+    {
+      "name": "antiguedad",
+      "displayName": "Retención por antigüedad: sensibilidad",
+      "queryLines": [
+        "SELECT 'Todos los clientes' AS grupo, tipo_cliente, round(MEASURE(tasa_retencion), 3) AS tasa,\n",
+        "       MEASURE(activos_jun) AS activos_jun\n",
+        "FROM workspace.oro.mv_retencion\n",
+        "WHERE ventana_dias = 90\n",
+        "GROUP BY tipo_cliente\n",
+        "UNION ALL\n",
+        "SELECT 'Sin los 311 con alta posterior a su primera compra', tipo_cliente, round(MEASURE(tasa_retencion), 3),\n",
+        "       MEASURE(activos_jun)\n",
+        "FROM workspace.oro.mv_retencion\n",
+        "WHERE ventana_dias = 90 AND alta_posterior_a_primera_compra = 0\n",
+        "GROUP BY tipo_cliente\n"
+      ]
+    },
+    {
+      "name": "pruebas",
+      "displayName": "Pruebas de la última corrida publicada",
+      "queryLines": [
+        "SELECT capa, id_prueba, fuente_o_metrica, que_verifica,\n",
+        "  CASE WHEN severidad = 'bloquea' THEN 'Bloquea' ELSE 'Advierte' END AS severidad,\n",
+        "  CASE WHEN resultado = 'pasó' THEN 'Aprobada' WHEN severidad = 'bloquea' THEN 'Falló' ELSE 'Advertencia' END\n",
+        "    AS resultado,\n",
+        "  filas_que_fallan, accion_si_falla\n",
+        "FROM workspace.control.pruebas_resultados\n",
+        "WHERE id_corrida = (SELECT id_corrida FROM workspace.control.estado_corrida ORDER BY fecha_hora DESC LIMIT 1)\n",
+        "ORDER BY CASE WHEN resultado = 'Aprobada' THEN 1 ELSE 0 END,\n",
+        "  CASE capa WHEN 'bronce' THEN 1 WHEN 'plata' THEN 2 WHEN 'oro' THEN 3 ELSE 4 END, id_prueba\n"
+      ]
+    },
+    {
+      "name": "resumen_calidad",
+      "displayName": "Resumen de calidad de la última corrida",
+      "queryLines": [
+        "SELECT concat(CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING)) AS aprobadas_texto,\n",
+        "  CAST(avisos AS STRING) AS avisos_texto,\n",
+        "  CASE WHEN origen_ipc = 'api' THEN 'API mindicador.cl' WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'Respaldo sin fecha' ELSE concat('Respaldo del ', fecha_respaldo_ipc) END AS origen_ipc_texto,\n",
+        "  fecha_hora AS actualizado\n",
+        "FROM workspace.control.estado_corrida\n",
+        "ORDER BY fecha_hora DESC\n",
+        "LIMIT 1\n"
+      ]
+    },
+    {
+      "name": "corridas",
+      "displayName": "Historial de corridas",
+      "queryLines": [
+        "SELECT id_corrida, fecha_hora,\n",
+        "  concat(CAST(pruebas_ok AS STRING), ' de ', CAST(pruebas AS STRING)) AS pruebas_aprobadas,\n",
+        "  CASE WHEN origen_ipc = 'api' THEN 'API' WHEN fecha_respaldo_ipc = 'sin fecha' THEN 'Respaldo sin fecha' ELSE concat('Respaldo del ', fecha_respaldo_ipc) END AS origen_ipc\n",
+        "FROM workspace.control.estado_corrida\n",
+        "ORDER BY fecha_hora DESC\n",
+        "LIMIT 10\n"
+      ]
+    },
+    {
+      "name": "linaje",
+      "displayName": "Linaje de la métrica",
+      "queryLines": [
+        "SELECT campo_origen, regla_limpieza, campo_modelo, uso_en_la_metrica, pantalla\n",
+        "FROM workspace.control.linaje_metrica\n",
+        "ORDER BY orden\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "principal",
+      "displayName": "Retención y reposición",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "titulo",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## ¿La cadena está reteniendo a sus clientes o los está reponiendo?\n",
+                "Multitienda del Sur · clientes identificados del programa · cortes al 30-jun y al 31-dic de 2025. **Para** Marketing (dueño del tablero), Gerencia Comercial y Finanzas, **cada mes** al cierre: decidir a quién contactar y qué local revisar.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filtro_ventana",
+            "queries": [
+              {
+                "name": "filtro_ventana_opciones",
+                "query": {
+                  "datasetName": "opciones_ventana",
+                  "fields": [
+                    {
+                      "name": "ventana",
+                      "expression": "`ventana`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_ventana_kpi",
+                "query": {
+                  "datasetName": "kpi",
+                  "parameters": [
+                    {
+                      "name": "ventana",
+                      "keyword": "ventana"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_ventana_cascada",
+                "query": {
+                  "datasetName": "cascada",
+                  "parameters": [
+                    {
+                      "name": "ventana",
+                      "keyword": "ventana"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_ventana_tiendas",
+                "query": {
+                  "datasetName": "tiendas",
+                  "parameters": [
+                    {
+                      "name": "ventana",
+                      "keyword": "ventana"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "ventana",
+                    "displayName": "Ventana de cliente activo (días)",
+                    "queryName": "filtro_ventana_opciones"
+                  },
+                  {
+                    "parameterName": "ventana",
+                    "queryName": "filtro_ventana_kpi"
+                  },
+                  {
+                    "parameterName": "ventana",
+                    "queryName": "filtro_ventana_cascada"
+                  },
+                  {
+                    "parameterName": "ventana",
+                    "queryName": "filtro_ventana_tiendas"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "90"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Ventana de cliente activo (días)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "filtro_tipo",
+            "queries": [
+              {
+                "name": "filtro_tipo_opciones",
+                "query": {
+                  "datasetName": "opciones_tipo",
+                  "fields": [
+                    {
+                      "name": "tipo_cliente",
+                      "expression": "`tipo_cliente`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_tipo_kpi",
+                "query": {
+                  "datasetName": "kpi",
+                  "parameters": [
+                    {
+                      "name": "tipo",
+                      "keyword": "tipo"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_tipo_cascada",
+                "query": {
+                  "datasetName": "cascada",
+                  "parameters": [
+                    {
+                      "name": "tipo",
+                      "keyword": "tipo"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_tipo_tiendas",
+                "query": {
+                  "datasetName": "tiendas",
+                  "parameters": [
+                    {
+                      "name": "tipo",
+                      "keyword": "tipo"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "tipo_cliente",
+                    "displayName": "Tipo de cliente",
+                    "queryName": "filtro_tipo_opciones"
+                  },
+                  {
+                    "parameterName": "tipo",
+                    "queryName": "filtro_tipo_kpi"
+                  },
+                  {
+                    "parameterName": "tipo",
+                    "queryName": "filtro_tipo_cascada"
+                  },
+                  {
+                    "parameterName": "tipo",
+                    "queryName": "filtro_tipo_tiendas"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "Todos"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tipo de cliente"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "regla",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**Regla de lectura**, fijada antes de calcular: la cadena *repone* si más del 50% de los activos al 31-dic no estaba activo al 30-jun.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_retencion",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi",
+                  "fields": [
+                    {
+                      "name": "retencion_texto",
+                      "expression": "`retencion_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "retencion_texto",
+                  "displayName": "Tasa de retención semestral (activos al 30-jun que siguen activos al 31-dic)",
+                  "style": {
+                    "fontSize": 48
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tasa de retención semestral (activos al 30-jun que siguen activos al 31-dic)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_reposicion",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi",
+                  "fields": [
+                    {
+                      "name": "reposicion_texto",
+                      "expression": "`reposicion_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "reposicion_texto",
+                  "displayName": "Tasa de reposición (activos al 31-dic que no estaban activos al 30-jun)",
+                  "style": {
+                    "fontSize": 48
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tasa de reposición (activos al 31-dic que no estaban activos al 30-jun)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 3,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_conclusion",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi",
+                  "fields": [
+                    {
+                      "name": "conclusion_texto",
+                      "expression": "`conclusion_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "conclusion_texto",
+                  "displayName": "Respuesta según la regla de lectura",
+                  "style": {
+                    "fontSize": 48
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Respuesta según la regla de lectura"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 3,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "cmp_retencion",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi",
+                  "fields": [
+                    {
+                      "name": "comparacion_retencion",
+                      "expression": "`comparacion_retencion`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "comparacion_retencion",
+                  "displayName": "Frente a la meta",
+                  "style": {
+                    "fontSize": 14
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Frente a la meta"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "cmp_reposicion",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi",
+                  "fields": [
+                    {
+                      "name": "comparacion_reposicion",
+                      "expression": "`comparacion_reposicion`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "comparacion_reposicion",
+                  "displayName": "Frente al umbral",
+                  "style": {
+                    "fontSize": 14
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Frente al umbral"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 5,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "cobertura",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "kpi",
+                  "fields": [
+                    {
+                      "name": "cobertura_texto",
+                      "expression": "`cobertura_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "cobertura_texto",
+                  "displayName": "Cobertura (las boletas anónimas no entran)",
+                  "style": {
+                    "fontSize": 14
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cobertura (las boletas anónimas no entran)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 5,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "grafico_cascada",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "cascada",
+                  "fields": [
+                    {
+                      "name": "corte",
+                      "expression": "`corte`"
+                    },
+                    {
+                      "name": "estado",
+                      "expression": "`estado`"
+                    },
+                    {
+                      "name": "sum(clientes)",
+                      "expression": "SUM(`clientes`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "corte",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "corte"
+                },
+                "y": {
+                  "fieldName": "sum(clientes)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Clientes",
+                  "axis": {
+                    "title": "Clientes"
+                  }
+                },
+                "color": {
+                  "fieldName": "estado",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Siguen activos (retenidos)",
+                        "color": "#8C8A84"
+                      },
+                      {
+                        "value": "Perdidos",
+                        "color": "#D9D6CF"
+                      },
+                      {
+                        "value": "Reactivados",
+                        "color": "#F4B496"
+                      },
+                      {
+                        "value": "Nuevos",
+                        "color": "#E8612C"
+                      }
+                    ]
+                  },
+                  "displayName": "Estado"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clientes activos al 30-jun y al 31-dic (n.º de clientes)",
+                "showDescription": true,
+                "description": "En naranjo, los reemplazos: clientes activos en diciembre que no lo estaban en junio."
+              },
+              "mark": {
+                "layout": "stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "grafico_locales",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tiendas",
+                  "fields": [
+                    {
+                      "name": "tienda",
+                      "expression": "`tienda`"
+                    },
+                    {
+                      "name": "lectura",
+                      "expression": "`lectura`"
+                    },
+                    {
+                      "name": "sum(tasa)",
+                      "expression": "SUM(`tasa`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(tasa)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Retención",
+                  "axis": {
+                    "title": "Retención"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "tienda",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "tienda"
+                },
+                "color": {
+                  "fieldName": "lectura",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Bajo la cadena",
+                        "color": "#E8612C"
+                      },
+                      {
+                        "value": "No concluyente",
+                        "color": "#D9D6CF"
+                      },
+                      {
+                        "value": "Sobre la cadena",
+                        "color": "#5F5E5A"
+                      }
+                    ]
+                  },
+                  "displayName": "Lectura"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tasa de retención semestral por local principal (% de clientes)",
+                "showDescription": true,
+                "description": "En naranjo, el local cuyo intervalo de confianza al 95% queda completo bajo la tasa de la cadena. Orden alfabético: sin ranking."
+              },
+              "mark": {
+                "layout": "stack"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 6,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "titulo_accion",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Contactar a quien cumple 34 días sin comprar: cuánto vale y cuánto cuesta\n",
+                "Margen bruto en pesos de diciembre de 2025. Costos informados por Marketing (17-nov): mensaje de $80 a $120, 4 horas de preparación por campaña a $15.000 la hora y cupón de 10% (tope $5.000) que solo cuesta si se canjea.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "vale",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "vale_texto",
+                      "expression": "`vale_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "vale_texto",
+                  "displayName": "Vale: margen anual de 10 puntos más de retención (49 clientes)",
+                  "style": {
+                    "fontSize": 40
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Vale: margen anual de 10 puntos más de retención (49 clientes)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "cuesta",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "cuesta_texto",
+                      "expression": "`cuesta_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "cuesta_texto",
+                  "displayName": "Cuesta: la campaña durante un año",
+                  "style": {
+                    "fontSize": 40
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cuesta: la campaña durante un año"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 13,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "equilibrio",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "equilibrio_texto",
+                      "expression": "`equilibrio_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "equilibrio_texto",
+                  "displayName": "Cada campaña se paga si reactiva",
+                  "style": {
+                    "fontSize": 28
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cada campaña se paga si reactiva"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 13,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "filtro_frecuencia",
+            "queries": [
+              {
+                "name": "filtro_frecuencia_opciones",
+                "query": {
+                  "datasetName": "opciones_frecuencia",
+                  "fields": [
+                    {
+                      "name": "frecuencia",
+                      "expression": "`frecuencia`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_frecuencia_vale_cuesta",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "parameters": [
+                    {
+                      "name": "frecuencia",
+                      "keyword": "frecuencia"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "frecuencia",
+                    "displayName": "Frecuencia de la campaña",
+                    "queryName": "filtro_frecuencia_opciones"
+                  },
+                  {
+                    "parameterName": "frecuencia",
+                    "queryName": "filtro_frecuencia_vale_cuesta"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "Mensual"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Frecuencia de la campaña"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "filtro_costo",
+            "queries": [
+              {
+                "name": "filtro_costo_opciones",
+                "query": {
+                  "datasetName": "opciones_costo",
+                  "fields": [
+                    {
+                      "name": "costo_contacto",
+                      "expression": "`costo_contacto`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_costo_vale_cuesta",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "parameters": [
+                    {
+                      "name": "costo_contacto",
+                      "keyword": "costo_contacto"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "costo_contacto",
+                    "displayName": "Costo por mensaje ($)",
+                    "queryName": "filtro_costo_opciones"
+                  },
+                  {
+                    "parameterName": "costo_contacto",
+                    "queryName": "filtro_costo_vale_cuesta"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "100"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Costo por mensaje ($)"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 15,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "filtro_canje",
+            "queries": [
+              {
+                "name": "filtro_canje_opciones",
+                "query": {
+                  "datasetName": "opciones_canje",
+                  "fields": [
+                    {
+                      "name": "canje",
+                      "expression": "`canje`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "filtro_canje_vale_cuesta",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "parameters": [
+                    {
+                      "name": "canje",
+                      "keyword": "canje"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "canje",
+                    "displayName": "Clientes contactados que canjean el cupón (%)",
+                    "queryName": "filtro_canje_opciones"
+                  },
+                  {
+                    "parameterName": "canje",
+                    "queryName": "filtro_canje_vale_cuesta"
+                  }
+                ]
+              },
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "15"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clientes contactados que canjean el cupón (%)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 15,
+            "width": 2,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "costo_campana",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "costo_campana_texto",
+                      "expression": "`costo_campana_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "costo_campana_texto",
+                  "displayName": "Costo por campaña",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Costo por campaña"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 1,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "contactos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "contactos_texto",
+                      "expression": "`contactos_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "contactos_texto",
+                  "displayName": "Contactos por campaña",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Contactos por campaña"
+              }
+            }
+          },
+          "position": {
+            "x": 1,
+            "y": 16,
+            "width": 1,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "dia_contacto",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "dia_texto",
+                      "expression": "`dia_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "dia_texto",
+                  "displayName": "Días sin comprar al contacto",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Días sin comprar al contacto"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 16,
+            "width": 1,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "vuelven_solos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "vuelven_texto",
+                      "expression": "`vuelven_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "vuelven_texto",
+                  "displayName": "Vuelven solos en 90 días",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Vuelven solos en 90 días"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 16,
+            "width": 1,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "margen_cliente",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "margen_cliente_texto",
+                      "expression": "`margen_cliente_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "margen_cliente_texto",
+                  "displayName": "Margen anual por cliente reactivado",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Margen anual por cliente reactivado"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 16,
+            "width": 1,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "clientes_anio",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "vale_cuesta",
+                  "fields": [
+                    {
+                      "name": "clientes_anio_texto",
+                      "expression": "`clientes_anio_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "clientes_anio_texto",
+                  "displayName": "Clientes que pagan el año",
+                  "style": {
+                    "fontSize": 16
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Clientes que pagan el año"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 16,
+            "width": 1,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "tabla_locales",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "tiendas",
+                  "fields": [
+                    {
+                      "name": "tienda",
+                      "expression": "`tienda`"
+                    },
+                    {
+                      "name": "activos_jun",
+                      "expression": "`activos_jun`"
+                    },
+                    {
+                      "name": "retenidos",
+                      "expression": "`retenidos`"
+                    },
+                    {
+                      "name": "tasa_texto",
+                      "expression": "`tasa_texto`"
+                    },
+                    {
+                      "name": "intervalo_95",
+                      "expression": "`intervalo_95`"
+                    },
+                    {
+                      "name": "tasa_cadena_texto",
+                      "expression": "`tasa_cadena_texto`"
+                    },
+                    {
+                      "name": "lectura",
+                      "expression": "`lectura`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "tienda",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Local principal",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Local principal"
+                  },
+                  {
+                    "fieldName": "activos_jun",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Activos al 30-jun",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Activos al 30-jun",
+                    "numberFormat": "0"
+                  },
+                  {
+                    "fieldName": "retenidos",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Siguen activos al 31-dic",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Siguen activos al 31-dic",
+                    "numberFormat": "0"
+                  },
+                  {
+                    "fieldName": "tasa_texto",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "Tasa de retención",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Tasa de retención"
+                  },
+                  {
+                    "fieldName": "intervalo_95",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "Intervalo de confianza 95%",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Intervalo de confianza 95%"
+                  },
+                  {
+                    "fieldName": "tasa_cadena_texto",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 5,
+                    "title": "Cadena",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Cadena"
+                  },
+                  {
+                    "fieldName": "lectura",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 6,
+                    "title": "Lectura",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Lectura"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Detalle por local"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "pie",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "estado",
+                  "fields": [
+                    {
+                      "name": "pie",
+                      "expression": "`pie`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "pie",
+                  "displayName": "Fuente y estado de los datos",
+                  "style": {
+                    "fontSize": 12
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Fuente y estado de los datos"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 24,
+            "width": 6,
+            "height": 1
+          }
+        }
+      ]
+    },
+    {
+      "name": "definicion",
+      "displayName": "Decisiones",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "titulo_def",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Decisión de definición: la ventana de cliente activo\n",
+                "La definición mueve el número, pero no la conclusión: con 30, 90 y 180 días, más de la mitad de los activos de diciembre son reemplazos.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "grafico_ventanas",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ventanas",
+                  "fields": [
+                    {
+                      "name": "ventana_dias",
+                      "expression": "`ventana_dias`"
+                    },
+                    {
+                      "name": "medida",
+                      "expression": "`medida`"
+                    },
+                    {
+                      "name": "sum(valor)",
+                      "expression": "SUM(`valor`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "ventana_dias",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "ventana_dias"
+                },
+                "y": {
+                  "fieldName": "sum(valor)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "% de clientes",
+                  "axis": {
+                    "title": "% de clientes"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "medida",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Tasa de retención semestral",
+                        "color": "#8C8A84"
+                      },
+                      {
+                        "value": "Tasa de reposición",
+                        "color": "#E8612C"
+                      }
+                    ]
+                  },
+                  "displayName": "Medida"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Retención y reposición según la ventana de cliente activo (% de clientes)",
+                "showDescription": true,
+                "description": "Eje horizontal: días de la ventana. 90 es la definición; 180, la alternativa; 30, la referencia de la contraparte."
+              },
+              "mark": {
+                "layout": "group"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "por_que_90",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Por qué 90 días\n",
+                "La mitad de los clientes vuelve en 13 días y el 93% de las pausas entre compras dura menos de 90 días. Con 30 días, más de un cuarto de las pausas normales se leería como pérdida.\n",
+                "\n",
+                "**Regla de lectura**, fijada antes de calcular: la cadena repone si más del 50% de los activos al 31-dic no estaba activo al 30-jun.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tabla_ventanas",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ventanas_tabla",
+                  "fields": [
+                    {
+                      "name": "ventana",
+                      "expression": "`ventana`"
+                    },
+                    {
+                      "name": "retencion",
+                      "expression": "`retencion`"
+                    },
+                    {
+                      "name": "reposicion",
+                      "expression": "`reposicion`"
+                    },
+                    {
+                      "name": "lectura",
+                      "expression": "`lectura`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "ventana",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Ventana",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Ventana"
+                  },
+                  {
+                    "fieldName": "retencion",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Tasa de retención semestral",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Tasa de retención semestral"
+                  },
+                  {
+                    "fieldName": "reposicion",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Tasa de reposición",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Tasa de reposición"
+                  },
+                  {
+                    "fieldName": "lectura",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "Lectura",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Lectura"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Detalle por ventana"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 6,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "grafico_antiguedad",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "antiguedad",
+                  "fields": [
+                    {
+                      "name": "tipo_cliente",
+                      "expression": "`tipo_cliente`"
+                    },
+                    {
+                      "name": "grupo",
+                      "expression": "`grupo`"
+                    },
+                    {
+                      "name": "sum(tasa)",
+                      "expression": "SUM(`tasa`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "tipo_cliente",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "tipo_cliente"
+                },
+                "y": {
+                  "fieldName": "sum(tasa)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Retención",
+                  "axis": {
+                    "title": "Retención"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 1
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "grupo",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Todos los clientes",
+                        "color": "#8C8A84"
+                      },
+                      {
+                        "value": "Sin los 311 con alta posterior a su primera compra",
+                        "color": "#E8612C"
+                      }
+                    ]
+                  },
+                  "displayName": "Grupo"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tasa de retención semestral con 90 días por tipo de cliente (% de clientes)"
+              },
+              "mark": {
+                "layout": "group"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 4,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "nota_antiguedad",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Sensibilidad de la antigüedad\n",
+                "El tipo de cliente se define por la fecha de alta en la tarjeta. 311 clientes tienen el alta después de su primera compra; todos tienen el alta en 2025, así que la base heredada no cambia. Sin ellos, la brecha entre nuevos y heredada se reduce de 8,9 a 3,7 puntos: no es concluyente. La conclusión (repone) no depende de esta definición.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 11,
+            "width": 2,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "titulo_frecuencia",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Decisión de frecuencia de la campaña de contacto\n",
+                "Preparar una campaña cuesta lo mismo sin importar a cuántos clientes llegue, así que la frecuencia decide el costo. Costos con $100 por mensaje y canje de 15%.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 6,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "grafico_frecuencias",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "frecuencias_costos",
+                  "fields": [
+                    {
+                      "name": "frecuencia",
+                      "expression": "`frecuencia`"
+                    },
+                    {
+                      "name": "componente",
+                      "expression": "`componente`"
+                    },
+                    {
+                      "name": "sum(millones)",
+                      "expression": "SUM(`millones`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "frecuencia",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "frecuencia"
+                },
+                "y": {
+                  "fieldName": "sum(millones)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "$ MM",
+                  "axis": {
+                    "title": "$ MM"
+                  }
+                },
+                "color": {
+                  "fieldName": "componente",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Preparación (4 h por campaña)",
+                        "color": "#E8612C"
+                      },
+                      {
+                        "value": "Cupones canjeados",
+                        "color": "#8C8A84"
+                      },
+                      {
+                        "value": "Mensajes",
+                        "color": "#D9D6CF"
+                      }
+                    ]
+                  },
+                  "displayName": "Componente"
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Costo anual de la campaña según su frecuencia ($ MM, pesos de diciembre de 2025)",
+                "showDescription": true,
+                "description": "En naranjo, la preparación: 4 horas de un analista por campaña, a $15.000 la hora."
+              },
+              "mark": {
+                "layout": "stack"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 17,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "por_que_mensual",
+            "multilineTextboxSpec": {
+              "lines": [
+                "### Por qué mensual\n",
+                "Solo la campaña mensual se paga antes de llegar a la meta: necesita 31 clientes reactivados al año (3 por campaña) y la meta son 49. La semanal necesita 91 y la quincenal 53. Además, es el ritmo con que Marketing ya trabaja.\n",
+                "\n",
+                "**Lo que se cede:** el contacto llega entre los días 34 y 63 sin comprar (mediana 45). Si la cadena entrega la lista de clientes y la preparación baja, una frecuencia mayor acerca el contacto al día 34.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 17,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tabla_frecuencias",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "frecuencias",
+                  "fields": [
+                    {
+                      "name": "frecuencia",
+                      "expression": "`frecuencia`"
+                    },
+                    {
+                      "name": "campanas",
+                      "expression": "`campanas`"
+                    },
+                    {
+                      "name": "contactos",
+                      "expression": "`contactos`"
+                    },
+                    {
+                      "name": "dias",
+                      "expression": "`dias`"
+                    },
+                    {
+                      "name": "preparacion",
+                      "expression": "`preparacion`"
+                    },
+                    {
+                      "name": "mensajes",
+                      "expression": "`mensajes`"
+                    },
+                    {
+                      "name": "cupones",
+                      "expression": "`cupones`"
+                    },
+                    {
+                      "name": "total",
+                      "expression": "`total`"
+                    },
+                    {
+                      "name": "clientes",
+                      "expression": "`clientes`"
+                    },
+                    {
+                      "name": "antes_de_la_meta",
+                      "expression": "`antes_de_la_meta`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "frecuencia",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Frecuencia",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Frecuencia"
+                  },
+                  {
+                    "fieldName": "campanas",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Campañas al año",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Campañas al año"
+                  },
+                  {
+                    "fieldName": "contactos",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Contactos al año",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Contactos al año"
+                  },
+                  {
+                    "fieldName": "dias",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "Días sin comprar al contacto",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Días sin comprar al contacto"
+                  },
+                  {
+                    "fieldName": "preparacion",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "Preparación",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Preparación"
+                  },
+                  {
+                    "fieldName": "mensajes",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 5,
+                    "title": "Mensajes",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Mensajes"
+                  },
+                  {
+                    "fieldName": "cupones",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 6,
+                    "title": "Cupones",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Cupones"
+                  },
+                  {
+                    "fieldName": "total",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 7,
+                    "title": "Costo anual",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Costo anual"
+                  },
+                  {
+                    "fieldName": "clientes",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 8,
+                    "title": "Clientes que lo pagan",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Clientes que lo pagan"
+                  },
+                  {
+                    "fieldName": "antes_de_la_meta",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 9,
+                    "title": "¿Antes de la meta (49)?",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "¿Antes de la meta (49)?"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Detalle por frecuencia"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 23,
+            "width": 6,
+            "height": 3
+          }
+        }
+      ]
+    },
+    {
+      "name": "calidad",
+      "displayName": "Calidad de datos",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "titulo_calidad",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Calidad de datos y trazabilidad\n",
+                "Cada corrida de la cadena ejecuta pruebas en todas las capas. Una prueba que *bloquea* detiene la publicación y el tablero conserva la última corrida válida; una que *advierte* deja continuar y queda indicada aquí y en el pie.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "cal_aprobadas",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "resumen_calidad",
+                  "fields": [
+                    {
+                      "name": "aprobadas_texto",
+                      "expression": "`aprobadas_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "aprobadas_texto",
+                  "displayName": "Pruebas aprobadas en la última corrida",
+                  "style": {
+                    "fontSize": 40
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pruebas aprobadas en la última corrida"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "cal_avisos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "resumen_calidad",
+                  "fields": [
+                    {
+                      "name": "avisos_texto",
+                      "expression": "`avisos_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avisos_texto",
+                  "displayName": "Advertencias",
+                  "style": {
+                    "fontSize": 40
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Advertencias"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "cal_ipc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "resumen_calidad",
+                  "fields": [
+                    {
+                      "name": "origen_ipc_texto",
+                      "expression": "`origen_ipc_texto`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "origen_ipc_texto",
+                  "displayName": "Origen del IPC",
+                  "style": {
+                    "fontSize": 28
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Origen del IPC"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 2,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "tabla_pruebas",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "pruebas",
+                  "fields": [
+                    {
+                      "name": "capa",
+                      "expression": "`capa`"
+                    },
+                    {
+                      "name": "id_prueba",
+                      "expression": "`id_prueba`"
+                    },
+                    {
+                      "name": "fuente_o_metrica",
+                      "expression": "`fuente_o_metrica`"
+                    },
+                    {
+                      "name": "que_verifica",
+                      "expression": "`que_verifica`"
+                    },
+                    {
+                      "name": "severidad",
+                      "expression": "`severidad`"
+                    },
+                    {
+                      "name": "resultado",
+                      "expression": "`resultado`"
+                    },
+                    {
+                      "name": "filas_que_fallan",
+                      "expression": "`filas_que_fallan`"
+                    },
+                    {
+                      "name": "accion_si_falla",
+                      "expression": "`accion_si_falla`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "capa",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Capa",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Capa"
+                  },
+                  {
+                    "fieldName": "id_prueba",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Prueba",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Prueba"
+                  },
+                  {
+                    "fieldName": "fuente_o_metrica",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Protege",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Protege"
+                  },
+                  {
+                    "fieldName": "que_verifica",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "Qué verifica",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Qué verifica"
+                  },
+                  {
+                    "fieldName": "severidad",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "Tipo",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Tipo"
+                  },
+                  {
+                    "fieldName": "resultado",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 5,
+                    "title": "Resultado",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Resultado"
+                  },
+                  {
+                    "fieldName": "filas_que_fallan",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "integer",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 6,
+                    "title": "Filas que fallan",
+                    "allowSearch": false,
+                    "alignContent": "right",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Filas que fallan",
+                    "numberFormat": "0"
+                  },
+                  {
+                    "fieldName": "accion_si_falla",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 7,
+                    "title": "Acción si falla",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Acción si falla"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Pruebas de la última corrida publicada"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "tabla_corridas",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "corridas",
+                  "fields": [
+                    {
+                      "name": "id_corrida",
+                      "expression": "`id_corrida`"
+                    },
+                    {
+                      "name": "fecha_hora",
+                      "expression": "`fecha_hora`"
+                    },
+                    {
+                      "name": "pruebas_aprobadas",
+                      "expression": "`pruebas_aprobadas`"
+                    },
+                    {
+                      "name": "origen_ipc",
+                      "expression": "`origen_ipc`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "id_corrida",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Corrida",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Corrida"
+                  },
+                  {
+                    "fieldName": "fecha_hora",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Fecha y hora",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Fecha y hora"
+                  },
+                  {
+                    "fieldName": "pruebas_aprobadas",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Pruebas aprobadas",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Pruebas aprobadas"
+                  },
+                  {
+                    "fieldName": "origen_ipc",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "Origen del IPC",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Origen del IPC"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Últimas corridas publicadas"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "tabla_linaje",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "linaje",
+                  "fields": [
+                    {
+                      "name": "campo_origen",
+                      "expression": "`campo_origen`"
+                    },
+                    {
+                      "name": "regla_limpieza",
+                      "expression": "`regla_limpieza`"
+                    },
+                    {
+                      "name": "campo_modelo",
+                      "expression": "`campo_modelo`"
+                    },
+                    {
+                      "name": "uso_en_la_metrica",
+                      "expression": "`uso_en_la_metrica`"
+                    },
+                    {
+                      "name": "pantalla",
+                      "expression": "`pantalla`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "campo_origen",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0,
+                    "title": "Campo de origen",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Campo de origen"
+                  },
+                  {
+                    "fieldName": "regla_limpieza",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1,
+                    "title": "Regla de limpieza",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Regla de limpieza"
+                  },
+                  {
+                    "fieldName": "campo_modelo",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 2,
+                    "title": "Campo del modelo",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Campo del modelo"
+                  },
+                  {
+                    "fieldName": "uso_en_la_metrica",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 3,
+                    "title": "Uso en la métrica",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Uso en la métrica"
+                  },
+                  {
+                    "fieldName": "pantalla",
+                    "booleanValues": [
+                      "false",
+                      "true"
+                    ],
+                    "imageUrlTemplate": "{{ @ }}",
+                    "imageTitleTemplate": "{{ @ }}",
+                    "imageWidth": "",
+                    "imageHeight": "",
+                    "linkUrlTemplate": "{{ @ }}",
+                    "linkTextTemplate": "{{ @ }}",
+                    "linkTitleTemplate": "{{ @ }}",
+                    "linkOpenInNewTab": true,
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 4,
+                    "title": "Pantalla",
+                    "allowSearch": false,
+                    "alignContent": "left",
+                    "allowHTML": false,
+                    "highlightLinks": false,
+                    "useMonospaceFont": false,
+                    "preserveWhitespace": false,
+                    "displayName": "Pantalla"
+                  }
+                ]
+              },
+              "invisibleColumns": [],
+              "allowHTMLByDefault": false,
+              "itemsPerPage": 25,
+              "paginationSize": "default",
+              "condensed": true,
+              "withRowNumber": false,
+              "frame": {
+                "showTitle": true,
+                "title": "Linaje de la métrica: del campo de origen a la pantalla"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    }
+  }
+}

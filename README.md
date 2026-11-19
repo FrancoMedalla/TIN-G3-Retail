@@ -1,153 +1,116 @@
-# Multitienda del Sur SpA · Entrega 1
+# Multitienda del Sur SpA · Cadena de datos de retención de clientes
 
-**IIC 3752 Tecnologías para la Inteligencia de Negocios · 2026-2 · Grupo 3**
+IIC 3752 Tecnologías para la Inteligencia de Negocios · 2026-2 · Grupo 3
 
-**NOTA: Se recomienda fuertemente correr el archivo pipeline_multitienda.ipynb desde Google Colab, entorno en el que fue desarrollado y probado para minimizar posibles problemas de compatibilidad y dependencias al ejecutarlo localmente**
+Pregunta de negocio: *¿la cadena está reteniendo a sus clientes o los está reponiendo con compradores de una sola vez?*
 
-Cadena de datos de la Entrega 1\. Responde la **Pregunta 1** del caso retail: *¿la cadena está reteniendo a sus clientes o los está reponiendo con compradores de una sola vez?*
+La cadena integra cuatro fuentes (POS en SQLite, maestro de productos en CSV, campañas en JSON e IPC desde la API de mindicador.cl), las procesa en capas bronce, plata, oro y semántica, ejecuta pruebas de calidad en cada capa y publica las tablas que consumen el informe y el tablero. El mismo código se ejecuta en Databricks (tablas Delta en Unity Catalog) y en local (Parquet).
 
-Un solo notebook lee las cuatro fuentes del caso, las limpia, construye el modelo dimensional, calcula la métrica y genera los gráficos y tablas del informe. Todas las cifras del informe salen de esta ejecución.
-
----
-
-## Contenido del repositorio
+## Estructura
 
 ```
 .
-├── pipeline_multitienda.ipynb        # la cadena completa (Etapas 1 a 5)
-├── requirements.txt                  # dependencias de Python
-├── README.md
-└── data/
-    ├── origen_pos.sqlite             # fuente 1: base del POS (SQLite)
-    ├── origen_maestro_productos.csv  # fuente 2: maestro de productos (CSV ; cp1252)
-    ├── origen_promociones.json       # fuente 3: campañas (JSON)
-    └── ipc_2025_respaldo.json        # copia de la fuente 4 (API mindicador.cl), solo si la API no responde
-└── salidas/                          # resultados de la última ejecución (los cita el informe)
-    ├── *.csv                         # métrica, cortes, cobertura, caso de negocio, bitácora
-    ├── modelo_dimensional.png
-    └── graficos/G1 … G5.png
+├── cadena/
+│   ├── comun.py                  # configuración, lectura/escritura, pruebas, bitácora y definición de la métrica
+│   ├── 00_preparar_entorno.py    # esquemas y Volumes
+│   ├── 01_bronce.py              # carga de las fuentes y pruebas por fuente
+│   ├── 02_plata.py               # limpieza, tipos y cobertura
+│   ├── 03_oro.py                 # modelo dimensional y diccionario de datos
+│   ├── 04_semantica.py           # métrica, metric view, tablas de consumo y estado de la corrida
+│   └── responsables_bitacora.csv # responsable y fecha de cada regla de la bitácora
+├── data/                         # fuentes y respaldo del IPC
+├── salidas/                      # cifras de la última corrida en CSV
+├── tablero/
+│   ├── retencion_clientes.lvdash.json  # tablero AI/BI de Databricks
+│   ├── generar_tablero.py        # genera el tablero y define sus consultas
+│   └── app_local.py              # copia local del tablero (Streamlit), con las mismas consultas
+├── databricks.yml                # definición del Job
+├── correr_local.py               # ejecución local
+└── requirements.txt
 ```
 
-&nbsp;
+## Capas
 
-`salidas/` se versiona como evidencia de las cifras del informe; al correr el notebook se regenera con el mismo contenido. Las carpetas intermedias `raw/`, `plata/` y `oro/` también las crea el notebook, pero no se suben (están en `.gitignore`).
+| Capa | Contenido | Tablas principales |
+|---|---|---|
+| bronce | Fuentes sin transformar, con origen y corrida | `bronce.pos_*`, `bronce.productos`, `bronce.promo_*`, `bronce.ipc_mensual` |
+| plata | Datos tipados y limpios según las reglas de la bitácora | `plata.boletas`, `plata.detalle`, `plata.clientes`, `plata.productos` |
+| oro | Esquema en estrella: `fact_venta_linea` y dimensiones de fecha, cliente, tienda, producto y campaña | `oro.fact_venta_linea`, `oro.dim_*`, `oro.diccionario_datos` |
+| semántica | Estado de cada cliente por ventana, metric view y tablas de consumo | `oro.cliente_ventana`, `oro.mv_retencion`, `oro.metrica_retencion`, `oro.retencion_por_*`, `oro.caso_negocio`, `oro.contacto_campanas` |
+| control | Resultados de pruebas, bitácoras, cobertura, linaje y estado de cada corrida | `control.pruebas_resultados`, `control.bitacora_carga`, `control.bitacora_supuestos`, `control.cobertura`, `control.linaje_metrica`, `control.estado_corrida` |
 
-La cuarta fuente, el IPC mensual 2025, se descarga en vivo desde `https://mindicador.cl/api/ipc/2025`. `ipc_2025_respaldo.json` es una copia de esa misma respuesta y solo se usa si la API no contesta después de tres intentos. Si eso ocurre, la bitácora de carga lo deja registrado.
+- **Carga completa:** cada corrida reconstruye las tablas de datos. Dos corridas con las mismas fuentes producen las mismas claves y cifras. Las tablas de `control` acumulan una entrada por corrida.
+- **Bitácora:** 41 reglas (25 de limpieza, 8 de modelo y 8 de métrica), cada una con su responsable y fecha; se regenera en cada corrida en `control.bitacora_supuestos`.
+- **Pruebas:** 70 pruebas en las cuatro capas; cada capa valida sus datos antes de publicarlos. Una prueba bloqueante que falla detiene el Job sin modificar la capa, por lo que el tablero conserva la última corrida válida. Las pruebas de advertencia permiten continuar y quedan indicadas en el pie del tablero.
+- **Falla de la API:** cuando la API responde, la respuesta se guarda como respaldo con su fecha de descarga (`ipc_2025_respaldo.json` en el Volume `bronce.fuentes`). Tras tres intentos fallidos se usa ese respaldo; el origen y la fecha quedan en `control.bitacora_carga` y en el pie del tablero. Sin respaldo, la corrida se detiene.
+- **Campaña de contacto:** `oro.contacto_campanas` simula, con las visitas de 2025, campañas semanales, quincenales y mensuales que contactan a quien cumple 34 días sin comprar, y calcula su costo con las cifras informadas por Marketing (mensaje de $100, 4 horas de preparación por campaña a $15.000 la hora, cupón de 10% con tope de $5.000 y canje de 15%). Los supuestos están en `comun.py` y en las reglas K07 y K08 de la bitácora.
+- **Dueños:** Marketing es dueño del tablero; el área del ERP responde por la extracción de los datos; la Gerencia Comercial es dueña de la definición de cliente activo.
+- **Linaje:** `control.linaje_metrica` sigue cada campo que entra en la métrica desde su origen, pasando por la regla de limpieza y el modelo, hasta la pantalla que lo muestra.
 
----
+## Ejecución en Databricks
 
-## Opción A: Google Colab (recomendada)
+1. Workspace → *Create* → *Git folder*, con la URL de este repositorio.
+2. Jobs & Pipelines → *Create job*, cómputo *Serverless*:
+   - Parámetros: `catalogo` = `workspace`, `url_ipc` = `https://mindicador.cl/api/ipc/2025`, `id_corrida` = `{{job.run_id}}`.
+   - Cinco tareas de tipo *Notebook*, cada una dependiente de la anterior: `cadena/00_preparar_entorno.py`, `01_bronce.py`, `02_plata.py`, `03_oro.py`, `04_semantica.py`.
+   - Alternativa con la CLI de Databricks: `databricks bundle deploy && databricks bundle run cadena_retencion`.
+3. *Run now*. Las tablas quedan en el catálogo indicado y los CSV en el Volume `oro.salidas`.
 
-Colab ya trae Java, que PySpark necesita. No hay que instalar nada a mano.
+Si el catálogo principal del workspace tiene otro nombre, se debe ajustar el parámetro `catalogo`.
 
-1. Abrir [Google Colab](https://colab.research.google.com) → **Archivo → Subir notebook** → elegir `pipeline_multitienda.ipynb`.  
-2. **Entorno de ejecución → Ejecutar todas.**  
-3. Cuando la celda **"Archivos de entrada"** muestre el botón *Elegir archivos*, **subir los tres archivos** de `data/`: `origen_pos.sqlite`, `origen_maestro_productos.csv` y `origen_promociones.json`. Se pueden seleccionar los tres juntos. El notebook los mueve solo a `data/`.  
-   - Opcional: subir también `ipc_2025_respaldo.json` desde el panel de archivos a la carpeta `data/`, para tener el respaldo si la API falla.  
-4. Esperar a que termine. No hay que tocar nada más.
+## Tablero
 
-**Tiempo:** unos **2 a 3 minutos** en total (1 minuto instalando PySpark, más la ejecución).
+El tablero lee la metric view `oro.mv_retencion` y las tablas de `oro` y `control`, de modo que muestra siempre la última corrida de la cadena.
 
-## Opción B: entorno local
+- **Retención y reposición:** pregunta, audiencia y frecuencia; filtros de ventana (30, 90 o 180 días) y tipo de cliente; retención y reposición con su comparación, regla de lectura y cobertura; base activa de junio y diciembre; retención por local con intervalo de confianza; valor y costo de la campaña de contacto, con frecuencia, costo por mensaje y tasa de canje ajustables, y clientes reactivados que la pagan; detalle por local; pie con fuente, dueños, fecha de actualización, resultado de las pruebas y origen del IPC.
+- **Decisiones:** las tres ventanas lado a lado, la sensibilidad de la retención por antigüedad y el costo de la campaña según su frecuencia (semanal, quincenal o mensual).
+- **Calidad de datos:** pruebas de la última corrida, historial de corridas, origen del IPC y linaje de la métrica.
 
-Requisitos: **Python 3.10 a 3.12** y **Java 17**, que PySpark 3.5 necesita. Verificar con `java -version`.
+Importación:
 
-```sh
-git clone <URL_DEL_REPOSITORIO>
-cd <carpeta_del_repositorio>
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt jupyter
-jupyter nbconvert --to notebook --execute pipeline_multitienda.ipynb --output pipeline_ejecutado.ipynb
+1. *Dashboards* → *Create dashboard* (flecha) → *Import dashboard from file* → `tablero/retencion_clientes.lvdash.json`.
+2. Seleccionar el SQL warehouse del workspace y publicar con *Publish*.
+3. Para que el tablero se refresque al terminar la cadena, agregar al Job una sexta tarea de tipo *Dashboard*, dependiente de `semantica`, que apunte a este tablero.
+
+Si el catálogo no es `workspace`: `python tablero/generar_tablero.py <catalogo>` y volver a importar.
+
+## Ejecución local
+
+Requisitos: Python 3.10 a 3.12 y Java 17 o superior.
+
+```bash
+pip install -r requirements.txt
+python correr_local.py
 ```
 
-&nbsp;
+Tiempo aproximado: 45 segundos. Las tablas quedan en `lakehouse_local/` y los CSV en `salidas/`.
 
-Hay que ejecutarlo desde la carpeta del repositorio, para que encuentre `data/`. También se puede abrir con `jupyter notebook` y ejecutar todas las celdas.
+Copia local del tablero, con las mismas consultas y cifras que la versión de Databricks:
 
-**Tiempo:** alrededor de **1 minuto**.
-
----
-
-## Qué hace cada etapa
-
-| Etapa | Qué hace | Herramienta | Deja |
-| :---- | :---- | :---- | :---- |
-| 1\. Extracción | Lee las 4 fuentes sin modificarlas y verifica que no se pierdan filas | PySpark | `raw/{tabla}/{fecha_carga}/` en Parquet |
-| 2\. Limpieza | Fechas, montos, descuentos, duplicados, RUT, categorías, llaves huérfanas; cada regla queda en la bitácora | pandas | `plata/*.parquet` |
-| 3\. Modelo dimensional | Estrella con `fact_venta_linea` y 5 dimensiones; 15 controles de integridad que detienen la ejecución si fallan | pandas | `oro/*.parquet` |
-| 4\. Métrica | Retención semestral con ventana de 90, 180 y 30 días; cortes por tipo de cliente, tienda, canal y segmento | pandas | `salidas/*.csv` |
-| 5\. Evidencia | 5 gráficos, caso de negocio en pesos y resumen de cifras | matplotlib | `salidas/graficos/*.png` |
-
-&nbsp;
-
----
-
-## Qué se espera ver al final
-
-La penúltima celda imprime el resumen con las cifras del informe:
-
-```
-RESPUESTA A LA P1
-La cadena está REPONIENDO clientes más que reteniéndolos.
-- Con ventana de 90 días, de 487 clientes activos al 30 de junio siguen activos 202 al 31 de diciembre:
-  retención de 41.5%. Se perdieron 285.
-- De los 661 activos en diciembre, 459 (69.4%) no estaban activos en junio
-  (415 nuevos y 44 reactivados).
-- Con 180 días: retención 58.6% y reposición 58.7%. La conclusión se mantiene;
-  la definición mueve la retención en +17.2 puntos.
-...
+```bash
+streamlit run tablero/app_local.py
 ```
 
-&nbsp;
+## Resultado esperado
 
-Otros números de control que deben coincidir:
+Al final de la corrida se imprime `Corrida <id> publicada: 70/70 pruebas en verde, IPC desde api`. Si la API no responde, el resultado es `69/70` con `IPC desde respaldo`.
 
 | Control | Valor esperado |
-| :---- | :---- |
+|---|---|
 | Boletas en origen | 6.338 |
-| Boletas válidas 2025 | 6.239 |
 | Visitas identificadas usadas en la retención | 5.385 (85,0% del origen) |
-| Líneas en `fact_venta_linea` | 14.532 |
-| Venta total 2025 | \$79.964.082 |
-| Controles de integridad del modelo | todos `OK` |
-
-&nbsp;
-
-Archivos generados en `salidas/`:
-
-| Archivo | Uso en el informe |
-| :---- | :---- |
-| `metrica_retencion.csv` | Ficha de la métrica (D): resultado con 30, 90 y 180 días |
-| `retencion_por_tipo_cliente.csv`, `retencion_por_tienda_principal.csv`, `retencion_por_mezcla_canal.csv`, `retencion_por_segmento.csv` | Cortes de la métrica |
-| `recompra_90_nuevos_por_mes.csv`, `clientes_y_venta_mensual_por_tipo.csv`, `clientes_con_compra_por_tienda_y_mes.csv` | Evidencia complementaria (E) |
-| `caso_de_negocio.csv` | Hallazgo traducido a pesos de diciembre de 2025 (E) |
-| `cobertura.csv` | Cobertura de datos (E) |
-| `bitacora_supuestos.csv` | Anexo: bitácora de supuestos (36 reglas) |
-| `modelo_dimensional.png` | Diagrama del modelo (C) |
-| `graficos/G1` a `G5` | Visualizaciones (E) |
-
-&nbsp;
-
----
+| Filas de `fact_venta_linea` | 14.532 |
+| Tasa de retención semestral (90 días) | 41,5% (202 de 487) |
+| Tasa de reposición (90 días) | 69,4% (459 de 661): la cadena repone |
+| Tasa de retención semestral con 180 y 30 días | 58,6% y 18,6% |
+| Margen anual por cada 10 puntos de retención | $2,03 millones (pesos de diciembre de 2025) |
+| Campaña mensual de contacto | $1,26 millones al año; cada campaña se paga si reactiva 3 de 148 contactados |
 
 ## Problemas frecuentes
 
 | Síntoma | Causa y solución |
-| :---- | :---- |
-| `Faltan archivos en data/` | No se subieron los tres archivos de origen. Volver a ejecutar la celda de archivos y subirlos. |
-| `Intento 1 falló: ... Read timed out` en la celda del IPC | Normal: mindicador.cl a veces demora. El notebook reintenta; si los tres intentos fallan, usa `data/ipc_2025_respaldo.json`. |
-| `La API del IPC no respondió y no existe data/ipc_2025_respaldo.json` | Sin internet y sin respaldo. Copiar `ipc_2025_respaldo.json` a `data/`. |
-| `JAVA_HOME is not set` o un error de Java al iniciar Spark (solo en local) | Instalar Java 17 o usar Colab. |
-| Un `AssertionError` con texto como `Falla el control` | Uno de los controles de integridad detectó datos distintos a los esperados. Revisar que los archivos de `data/` sean los originales del caso. |
-
-&nbsp;
-
----
-
-## Notas
-
-- El notebook es **determinístico**: con los mismos archivos de entrada produce siempre las mismas cifras. La única parte que viene de internet, el IPC, es la serie cerrada de 2025\.  
-- La carpeta de carga en `raw/` se nombra con la fecha de ejecución (`raw/{tabla}/AAAAMMDD/`). Eso no cambia ninguna cifra.  
-- Decisiones de limpieza, modelo y métrica: ver `salidas/bitacora_supuestos.csv` y las celdas de texto del notebook.  
-- Uso de IA: el código fue desarrollado con apoyo de Claude (Anthropic). El detalle está en la declaración del informe.
+|---|---|
+| `Falta <archivo> en /Volumes/...` | La carpeta `data/` no está en el Git folder. Subir los cuatro archivos al Volume `bronce.fuentes`. |
+| `Intento 1 falló` en la capa bronce | La API no respondió. La cadena continúa con el respaldo y lo advierte. |
+| `Fallaron N pruebas bloqueantes en ...` | Una fuente cambió. Revisar `control.pruebas_resultados` para la última `id_corrida`. |
+| Error de Java en la ejecución local | Instalar Java 17 o superior y verificar con `java -version`. |

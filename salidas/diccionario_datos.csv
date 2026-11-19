@@ -1,0 +1,47 @@
+﻿tabla,campo,significado_negocio,origen,regla_transformacion,unidad
+fact_venta_linea,boleta_id,Número de boleta (dimensión degenerada),POS (SQLite) boletas.boleta_id,Sin duplicados exactos (B01); solo 2025 (B03),código
+fact_venta_linea,linea_id,Número de línea dentro de la boleta,Creado en la limpieza,Correlativo por boleta; reemplaza al número de línea repetido (D02),código
+fact_venta_linea,fecha_key,Día de la compra,POS (SQLite) boletas.fecha,5 formatos unificados (B02) a aaaammdd,aaaammdd
+fact_venta_linea,cliente_key,Cliente del programa (0 = anónimo),POS (SQLite) boletas.cliente_id,Nulo pasa a 0 (B06),código
+fact_venta_linea,tienda_key,Local de la compra,POS (SQLite) boletas.tienda_id,A entero,código
+fact_venta_linea,producto_key,Producto vendido,POS (SQLite) detalle.sku + Maestro de productos (CSV),SKU sin maestro con miembro propio (M03),código
+fact_venta_linea,campana_key,Campaña que aplica (0 = sin campaña),Campañas (JSON),Por SKU + fecha + canal (D06),código
+fact_venta_linea,cantidad,Unidades; negativa = devolución,POS (SQLite) detalle.cantidad,A entero (D04),unidades
+fact_venta_linea,monto_linea,Monto cobrado,POS (SQLite) detalle.monto_linea,Texto con punto de miles a número; no se corrige si no cuadra (D05),$ nominales
+fact_venta_linea,monto_linea_real_dic2025,Monto cobrado en pesos de diciembre de 2025,monto_linea + API mindicador.cl,monto_linea x factor del mes (I01),$ dic-2025
+fact_venta_linea,costo_linea,Costo de la línea,cantidad + Maestro de productos (CSV) costo_unitario,cantidad x costo unitario; vacío si el SKU no tiene costo (M08),$ nominales
+fact_venta_linea,margen_linea,Margen bruto de la línea,monto_linea y costo_linea,monto_linea - costo_linea (M08),$ nominales
+fact_venta_linea,margen_linea_real_dic2025,Margen bruto en pesos de diciembre de 2025,margen_linea + API mindicador.cl,margen_linea x factor del mes,$ dic-2025
+fact_venta_linea,tiene_costo,La línea tiene costo en el maestro,Maestro de productos (CSV),costo_linea no vacío,sí/no
+fact_venta_linea,linea_cuadra,El monto calza con precio x cantidad x (1 - descuento),POS (SQLite) detalle,Diferencia de hasta $1 (D05),sí/no
+dim_fecha,fecha_key,Llave del día,Calendario,aaaammdd,aaaammdd
+dim_fecha,fecha,Fecha calendario de 2025,Calendario,1-ene a 31-dic de 2025,fecha
+dim_fecha,mes,Mes del año,Calendario,Mes de la fecha,1 a 12
+dim_fecha,trimestre,Trimestre calendario,Calendario,T1 a T4 (lo usa K04),texto
+dim_fecha,ipc_var_mensual,Variación mensual del IPC,API mindicador.cl,Porcentaje / 100; fecha UTC a hora de Chile,proporción
+dim_fecha,factor_a_pesos_dic2025,Factor para expresar un monto en pesos de dic-2025,API mindicador.cl,Índice encadenado base dic-2024 = 100 (I01),factor
+dim_cliente,cliente_key,Cliente del programa (0 = anónimo),POS (SQLite) clientes.cliente_id,Miembro especial 0 = Anónimo,código
+dim_cliente,tipo_cliente,Base heredada o Nuevo 2025,POS (SQLite) clientes.fecha_alta,Alta antes de 2025 = Base heredada (M01),texto
+dim_cliente,segmento,"Clásico, Plus o Black (estado actual)",POS (SQLite) clientes.segmento,"Tipo 1, sin historial (CL02)",texto
+dim_cliente,fecha_alta,Inscripción en la tarjeta,POS (SQLite) clientes.fecha_alta,Dos formatos a fecha; no se corrige (M02),fecha
+dim_cliente,primera_visita_2025,Primera visita del año (adquisición de los nuevos),POS (SQLite) boletas,Mínima fecha con monto neto > 0,fecha
+dim_tienda,tienda_key,Local,POS (SQLite) tiendas.tienda_id,A entero,código
+dim_tienda,tienda,Nombre del local,POS (SQLite) tiendas.nombre,Sin cambios,texto
+dim_tienda,formato,"Tipo de local: Híper, Súper, Express u Online",POS (SQLite) tiendas.formato,Sin cambios,texto
+dim_tienda,canal,Cómo se compra: Presencial o Web,POS (SQLite) boletas.canal,Único por tienda (M04),texto
+dim_tienda,comuna,Comuna del local,POS (SQLite) comunas,Sin cambios,texto
+dim_tienda,region,Región del local,POS (SQLite) regiones,La Florida corregida a Metropolitana (T00),texto
+dim_tienda,macrozona,"Metropolitana, Centro sur o Sur",README del caso,Mapa región -> macrozona (T01),texto
+dim_producto,producto_key,Producto,Creado en el modelo,Correlativo,código
+dim_producto,sku,Código del producto,Maestro de productos (CSV) y POS (SQLite),Un registro por SKU (P04),código
+dim_producto,nombre,Nombre del producto,Maestro de productos (CSV),Espacios normalizados,texto
+dim_producto,categoria,Categoría (8),Maestro de productos (CSV),Nombres canónicos (P02),texto
+dim_producto,subcategoria,Subcategoría,Maestro de productos (CSV),Sin cambios; valida la categoría,texto
+dim_producto,en_maestro,El SKU existe en el catálogo,Maestro de productos (CSV),Falso = 'Sin maestro' (M03),sí/no
+dim_campana,campana_key,Campaña (0 = sin campaña),Creado en el modelo,Miembro especial 0,código
+dim_campana,campana_id,Código de la campaña,Campañas (JSON),Sin cambios,código
+dim_campana,nombre,Nombre de la campaña,Campañas (JSON),Sin cambios,texto
+dim_campana,tipo,Descuento directo o 2x1,Campañas (JSON),Sin cambios,texto
+dim_campana,fecha_ini,Inicio de la campaña,Campañas (JSON),A fecha,fecha
+dim_campana,fecha_fin,Último día de la campaña (inclusive),Campañas (JSON),A fecha,fecha
+dim_campana,descuento_pct,Descuento declarado,Campañas (JSON),25% y 50 a proporción (C01),proporción
